@@ -1065,22 +1065,31 @@ button.stopall { background: transparent; }
   requestAnimationFrame(frame);
 
   // --- preload the local midis/ folder into the bin on startup ---
+  // Bundled as one base64-encoded midis/bundle.json (rather than per-file
+  // fetches) so the exact same code works both served locally and as a
+  // published Artifact, whose sandbox only serves a fixed list of file
+  // types and doesn't include raw .mid files.
+  function base64ToArrayBuffer(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
   async function preloadBin() {
-    let manifest;
+    let bundle;
     try {
-      const res = await fetch("midis/manifest.json");
+      const res = await fetch("midis/bundle.json");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      manifest = await res.json();
+      bundle = await res.json();
     } catch (err) {
-      log(`No preload manifest found at midis/manifest.json (${errText(err)}) — add records manually instead.`);
+      log(`No preload bundle found at midis/bundle.json (${errText(err)}) — add records manually instead.`);
       return;
     }
     let loaded = 0, failed = 0;
-    for (const name of manifest) {
+    for (const name of Object.keys(bundle)) {
       try {
-        const res = await fetch(`midis/${encodeURIComponent(name)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const buf = await res.arrayBuffer();
+        const buf = base64ToArrayBuffer(bundle[name]);
         const midi = new Midi(buf);
         const entry = analyzeEntry(midi, name);
         binEntries.push(entry);

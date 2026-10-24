@@ -14,15 +14,20 @@ Then open `http://localhost:8000/index.html`. (Needs an actual http server — `
 
 ## The record bin
 
-Drop `.mid`/`.midi` files into `midis/`, then regenerate the manifest it preloads from on startup:
+Drop `.mid`/`.midi` files into `midis/`, then regenerate the base64 bundle it preloads from on startup:
 
 ```bash
 cd midis && python3 -c "
-import json, os
-files = sorted(f for f in os.listdir('.') if f.lower().endswith(('.mid', '.midi')))
-json.dump(files, open('manifest.json', 'w'), indent=2, ensure_ascii=False)
+import json, os, base64
+bundle = {}
+for f in sorted(os.listdir('.')):
+    if f.lower().endswith(('.mid', '.midi')):
+        bundle[f] = base64.b64encode(open(f, 'rb').read()).decode('ascii')
+json.dump(bundle, open('bundle.json', 'w'))
 "
 ```
+
+It's one base64-encoded JSON file rather than per-file fetches so the same code and the same bundle also work when published as a Claude Artifact, whose sandbox only serves a fixed list of file extensions (raw `.mid` isn't one of them, but `.json` is).
 
 You can still add more records manually from the page at any time — the preload just saves re-uploading the same set every session.
 
