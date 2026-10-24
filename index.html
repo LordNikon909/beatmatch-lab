@@ -1,0 +1,1062 @@
+<title>Beat Match Lab</title>
+<style>
+/* layout: a record bin feeding two decks, a shared phrase-grid visualizer, and a mix console below */
+:root {
+  --bg: #121016;
+  --panel: #1c1922;
+  --panel-raised: #262230;
+  --fg: #ece8f2;
+  --fg-dim: #9b93a8;
+  --accent-a: #ff5b7f;
+  --accent-b: #4fd6ff;
+  --warn: #ffcf5b;
+  --ok: #35c47a;
+  --line: #352f3f;
+  --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --display: "Space Mono", var(--mono);
+  --body: "Inter", system-ui, sans-serif;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f3f1f6;
+    --panel: #ffffff;
+    --panel-raised: #ebe7f2;
+    --fg: #201c28;
+    --fg-dim: #6b6478;
+    --line: #ddd7e4;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f3f1f6;
+  --panel: #ffffff;
+  --panel-raised: #ebe7f2;
+  --fg: #201c28;
+  --fg-dim: #6b6478;
+  --line: #ddd7e4;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+h1 { font-family: var(--display); font-size: clamp(22px, 4vw, 30px); margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+.sub { color: var(--fg-dim); font-size: 14px; margin: 2px 0 0; max-width: 68ch; line-height: 1.5; }
+.decks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 680px) { .decks { grid-template-columns: 1fr; } }
+.deck {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.deck[data-slot="a"] { border-top: 3px solid var(--accent-a); }
+.deck[data-slot="b"] { border-top: 3px solid var(--accent-b); }
+.deck-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.deck-head-left { display: flex; align-items: center; gap: 8px; }
+.deck-title { font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim); }
+.deck[data-slot="a"] .deck-title { color: var(--accent-a); }
+.deck[data-slot="b"] .deck-title { color: var(--accent-b); }
+.bpm-readout { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--fg-dim); }
+.key-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); }
+.live-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  padding: 2px 6px; border-radius: 4px; background: var(--ok); color: #06241a;
+}
+.track-name { font-size: 14px; min-height: 1.4em; overflow-wrap: anywhere; }
+.track-name.empty { color: var(--fg-dim); font-style: italic; }
+
+.filepick {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--fg-dim);
+  cursor: pointer;
+  text-align: center;
+  background: var(--panel-raised);
+  display: block;
+}
+.filepick:hover { border-color: var(--fg-dim); }
+.filepick input { display: none; }
+
+.row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.row label { font-size: 12px; color: var(--fg-dim); min-width: 72px; flex: none; }
+.row input[type="range"] { flex: 1; min-width: 0; }
+.row .val { font-family: var(--mono); font-size: 12px; min-width: 3.4em; text-align: right; flex: none; font-variant-numeric: tabular-nums; }
+select {
+  background: var(--panel-raised); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: var(--body);
+}
+
+button {
+  font-family: var(--body);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-raised);
+  color: var(--fg);
+  padding: 8px 14px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--fg-dim); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.primary[data-slot="a"] { background: var(--accent-a); color: #1a0a10; border-color: var(--accent-a); }
+button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; border-color: var(--accent-b); }
+.deck-buttons { display: flex; gap: 8px; }
+
+.console {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.console-title { font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim); }
+.console-controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; }
+
+.bin-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.bin-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--panel-raised); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; flex-wrap: wrap;
+}
+.bin-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.bin-name { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.bin-meta { font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); }
+.bin-tag {
+  align-self: flex-start; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
+  padding: 2px 6px; border-radius: 4px; margin-top: 2px;
+}
+.bin-tag.tag-a { background: var(--accent-a); color: #1a0a10; }
+.bin-tag.tag-b { background: var(--accent-b); color: #07232b; }
+.bin-actions { display: flex; gap: 8px; flex: none; }
+
+.phrase-panel { display: flex; flex-direction: column; gap: 8px; }
+.phrase-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.phrase-suggest { font-size: 12px; color: var(--fg-dim); font-family: var(--mono); }
+.phrase-track {
+  position: relative; height: 76px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel-raised); overflow: hidden;
+}
+.phrase-block { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--line); }
+.phrase-block.alt { background: rgba(255,255,255,0.04); }
+.phrase-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--line); }
+.phrase-score-bar { position: absolute; top: 0; width: 5px; left: -2.5px; background: var(--accent-a); border-radius: 0 0 3px 3px; opacity: 0.85; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); z-index: 3; }
+.trigger-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent-b); z-index: 2; }
+.overlap-window { position: absolute; top: 0; bottom: 0; background: rgba(79,214,255,0.16); z-index: 1; }
+.phrase-legend { font-size: 11.5px; color: var(--fg-dim); line-height: 1.5; }
+
+.meter-row { display: flex; gap: 18px; }
+.meter { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.meter-label { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); width: 14px; flex: none; }
+.meter-bar { flex: 1; height: 10px; border-radius: 6px; background: var(--panel-raised); overflow: hidden; }
+.meter-fill { height: 100%; width: 0%; transition: width 0.05s linear; }
+#meterA { background: var(--accent-a); }
+#meterB { background: var(--accent-b); }
+
+.harmony-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.harmony-badge {
+  font-size: 13px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel-raised); color: var(--fg-dim);
+}
+.harmony-badge.good { border-color: var(--ok); color: var(--ok); }
+.harmony-badge.warn { border-color: var(--warn); color: var(--warn); }
+.harmony-badge.bad { border-color: var(--accent-a); color: var(--accent-a); }
+
+.mix-state {
+  font-size: 13px; font-family: var(--mono); color: var(--fg);
+  background: var(--panel-raised); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; min-height: 1.4em;
+}
+.mix-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+button.mixin { background: linear-gradient(90deg, var(--accent-a), var(--accent-b)); color: #110b16; border: none; }
+button.stopall { background: transparent; }
+
+.log {
+  background: #000; color: #8fe88f; font-family: var(--mono);
+  font-size: 11.5px; line-height: 1.5; border-radius: 10px;
+  padding: 10px 12px; height: 130px; overflow-y: auto; white-space: pre-wrap;
+}
+.hint { font-size: 12px; color: var(--fg-dim); line-height: 1.5; }
+</style>
+
+<div class="wrap">
+  <div>
+    <h1>Beat Match Lab</h1>
+    <p class="sub">Add MIDI files to the bin below — each gets its BPM and key detected on the spot. Load any bin record onto Deck A or Deck B, press Play to go live, then load the next record into the other deck and press Beatmatch Mix. Whichever deck is live is always the anchor; the other deck mixes in. Once the fade completes, load a fresh record into the deck that just went quiet and keep the set going.</p>
+  </div>
+
+  <div class="console" id="binPanel">
+    <div class="console-title">Record Bin</div>
+    <label class="filepick" id="pickBin">
+      Add MIDI files to the bin&hellip;
+      <input type="file" accept=".mid,.midi" id="binInput" multiple>
+    </label>
+    <div class="bin-list" id="binList">
+      <p class="hint">No records yet — add a few MIDI files above.</p>
+    </div>
+  </div>
+
+  <div class="decks">
+    <div class="deck" data-slot="a">
+      <div class="deck-head">
+        <div class="deck-head-left">
+          <span class="deck-title">Deck A</span>
+          <span class="live-badge" id="liveBadgeA" hidden>LIVE</span>
+        </div>
+        <span class="bpm-readout" id="bpmA">— bpm</span>
+      </div>
+      <div class="track-name empty" id="nameA">No record loaded</div>
+      <div class="key-readout" id="keyA">Key: —</div>
+      <div class="deck-buttons">
+        <button class="primary" data-slot="a" id="playA" disabled>Play</button>
+        <button id="stopA" disabled>Stop</button>
+      </div>
+      <div class="row">
+        <label for="volA">Volume</label>
+        <input type="range" id="volA" min="0" max="100" value="85">
+        <span class="val" id="volAval">85%</span>
+      </div>
+      <div class="row">
+        <label for="semA">Transpose</label>
+        <input type="range" id="semA" min="-12" max="12" value="0">
+        <span class="val" id="semAval">0 st</span>
+      </div>
+    </div>
+
+    <div class="deck" data-slot="b">
+      <div class="deck-head">
+        <div class="deck-head-left">
+          <span class="deck-title">Deck B</span>
+          <span class="live-badge" id="liveBadgeB" hidden>LIVE</span>
+        </div>
+        <span class="bpm-readout" id="bpmB">— bpm</span>
+      </div>
+      <div class="track-name empty" id="nameB">No record loaded</div>
+      <div class="key-readout" id="keyB">Key: —</div>
+      <div class="deck-buttons">
+        <button class="primary" data-slot="b" id="playB" disabled>Play</button>
+        <button id="stopB" disabled>Stop</button>
+      </div>
+      <div class="row">
+        <label for="volB">Volume</label>
+        <input type="range" id="volB" min="0" max="100" value="80">
+        <span class="val" id="volBval">80%</span>
+      </div>
+      <div class="row">
+        <label for="semB">Transpose</label>
+        <input type="range" id="semB" min="-12" max="12" value="0">
+        <span class="val" id="semBval">0 st</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="console">
+    <div class="phrase-panel">
+      <div class="phrase-panel-head">
+        <span class="console-title" id="phraseHeader">Phrase Grid</span>
+        <span class="phrase-suggest" id="phraseSuggest">No deck is live yet.</span>
+      </div>
+      <div class="phrase-track" id="phraseTrack">
+        <div class="playhead" id="playhead" hidden></div>
+        <div class="trigger-marker" id="triggerMarker" hidden></div>
+        <div class="overlap-window" id="overlapWindow" hidden></div>
+      </div>
+      <p class="phrase-legend">Shaded blocks = phrase groups at the selected bar length, for whichever deck is currently live. The short bars on each grid line = self-similarity "boundary strength" (taller = more likely a real section change — a heuristic, not verified song structure). Amber line = playhead. Dashed cyan line = the mix trigger point once armed.</p>
+    </div>
+
+    <div class="console-controls">
+      <div class="row">
+        <label for="phraseLenSel">Phrase length</label>
+        <select id="phraseLenSel">
+          <option value="2">2 bars</option>
+          <option value="4" selected>4 bars</option>
+          <option value="8">8 bars</option>
+          <option value="16">16 bars</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="overlapLenSel">Overlap</label>
+        <select id="overlapLenSel">
+          <option value="1">1 bar</option>
+          <option value="2">2 bars</option>
+          <option value="4" selected>4 bars</option>
+          <option value="8">8 bars</option>
+          <option value="16">16 bars</option>
+          <option value="32">32 bars</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="meter-row">
+      <div class="meter"><span class="meter-label">A</span><div class="meter-bar"><div class="meter-fill" id="meterA"></div></div></div>
+      <div class="meter"><span class="meter-label">B</span><div class="meter-bar"><div class="meter-fill" id="meterB"></div></div></div>
+    </div>
+
+    <div class="harmony-row">
+      <span class="harmony-badge" id="harmonyBadge">Load a record into each deck to check harmonic compatibility.</span>
+      <button id="applyTranspose" hidden>Apply suggested transpose</button>
+    </div>
+
+    <div class="mix-state" id="mixState">Idle. Press Play on a deck to start the set, load a record into the other deck, then press Beatmatch Mix.</div>
+
+    <div class="mix-actions">
+      <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
+      <button class="stopall" id="stopAll">Stop All</button>
+    </div>
+    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Assumes 4/4 time and that a record's own MIDI start is its downbeat. Phrase detection is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material.</p>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
+<script src="https://unpkg.com/@tonejs/midi@2.0.28/build/Midi.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const logEl = document.getElementById("log");
+  function log(msg) {
+    const t = new Date().toLocaleTimeString([], { hour12: false });
+    logEl.textContent += `[${t}] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function percKind(midiNum) {
+    if (midiNum === 35 || midiNum === 36) return "kick";
+    if (midiNum === 38 || midiNum === 40) return "snare";
+    if ([42, 44, 46, 49, 51, 55, 57, 59].includes(midiNum)) return "hat";
+    return "kick";
+  }
+
+  function collectNotes(midi) {
+    const melodic = [];
+    const perc = [];
+    midi.tracks.forEach((track) => {
+      const isPerc = !!(track.instrument && track.instrument.percussion) || track.channel === 9;
+      track.notes.forEach((n) => {
+        const entry = { time: n.time, duration: n.duration, velocity: n.velocity, midi: n.midi };
+        (isPerc ? perc : melodic).push(entry);
+      });
+    });
+    return { melodic, perc };
+  }
+
+  // --- phrase analysis (heuristic self-similarity over bar-bucketed note content) ---
+  function analyzeBars(info) {
+    const barLen = (60 / info.bpm) * 4; // assume 4/4
+    const totalBars = Math.max(1, Math.ceil(info.duration / barLen));
+    const bars = Array.from({ length: totalBars }, () => ({ count: 0, hist: new Array(12).fill(0) }));
+    const { melodic } = collectNotes(info.midi);
+    melodic.forEach((n) => {
+      const idx = Math.min(totalBars - 1, Math.floor(n.time / barLen));
+      bars[idx].count++;
+      bars[idx].hist[((n.midi % 12) + 12) % 12]++;
+    });
+    return { barLen, totalBars, bars };
+  }
+
+  function cosineDist(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+    if (na === 0 || nb === 0) return null;
+    return 1 - dot / (Math.sqrt(na) * Math.sqrt(nb));
+  }
+
+  function phraseBoundaries(barsData, phraseLen) {
+    const { bars, totalBars, barLen } = barsData;
+    const out = [];
+    const sum = (arr) => arr.reduce((acc, b) => {
+      acc.count += b.count;
+      for (let i = 0; i < 12; i++) acc.hist[i] += b.hist[i];
+      return acc;
+    }, { count: 0, hist: new Array(12).fill(0) });
+    for (let k = phraseLen; k < totalBars; k += phraseLen) {
+      const prevBars = bars.slice(Math.max(0, k - phraseLen), k);
+      const nextBars = bars.slice(k, Math.min(totalBars, k + phraseLen));
+      if (!prevBars.length || !nextBars.length) continue;
+      const p = sum(prevBars), n = sum(nextBars);
+      const densP = p.count / prevBars.length, densN = n.count / nextBars.length;
+      const densDelta = Math.abs(densP - densN) / (densP + densN + 1e-6);
+      const pitchDist = cosineDist(p.hist, n.hist);
+      const score = pitchDist === null ? densDelta : (0.7 * pitchDist + 0.3 * densDelta);
+      out.push({ bar: k, time: k * barLen, score });
+    }
+    return out;
+  }
+
+  function suggestPhraseLength(barsData) {
+    const candidates = [4, 8, 16];
+    let best = null;
+    candidates.forEach((L) => {
+      if (barsData.totalBars < 2 * L) return;
+      const b = phraseBoundaries(barsData, L);
+      if (!b.length) return;
+      const scores = b.map((x) => x.score).sort((a, c) => a - c);
+      const max = scores[scores.length - 1];
+      const median = scores[Math.floor(scores.length / 2)];
+      const contrast = max - median;
+      if (!best || contrast > best.contrast) best = { L, contrast, max };
+    });
+    return best ? best.L : 4;
+  }
+
+  // --- key detection (Krumhansl-Schmuckler: correlate a duration-weighted
+  // pitch-class histogram against the 24 major/minor key profiles) ---
+  const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+  const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+  const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+
+  function pearson(a, b) {
+    const n = a.length;
+    const meanA = a.reduce((s, v) => s + v, 0) / n;
+    const meanB = b.reduce((s, v) => s + v, 0) / n;
+    let num = 0, da = 0, db = 0;
+    for (let i = 0; i < n; i++) {
+      const xa = a[i] - meanA, xb = b[i] - meanB;
+      num += xa * xb; da += xa * xa; db += xb * xb;
+    }
+    if (da === 0 || db === 0) return 0;
+    return num / Math.sqrt(da * db);
+  }
+
+  function correlateForRoot(hist, profileBase, root) {
+    const rotated = new Array(12);
+    for (let p = 0; p < 12; p++) rotated[p] = profileBase[(p - root + 12) % 12];
+    return pearson(hist, rotated);
+  }
+
+  function detectKey(info) {
+    const { melodic } = collectNotes(info.midi);
+    const hist = new Array(12).fill(0);
+    melodic.forEach((n) => { hist[((n.midi % 12) + 12) % 12] += n.duration; });
+    const total = hist.reduce((a, b) => a + b, 0);
+    if (total === 0) return null;
+    let best = null;
+    for (let r = 0; r < 12; r++) {
+      const majorScore = correlateForRoot(hist, MAJOR_PROFILE, r);
+      const minorScore = correlateForRoot(hist, MINOR_PROFILE, r);
+      if (!best || majorScore > best.score) best = { root: r, mode: "major", score: majorScore };
+      if (minorScore > best.score) best = { root: r, mode: "minor", score: minorScore };
+    }
+    return { root: best.root, mode: best.mode, score: best.score, name: `${NOTE_NAMES[best.root]} ${best.mode}` };
+  }
+
+  function keyCompatibility(keyA, keyB) {
+    const diff = ((keyB.root - keyA.root) % 12 + 12) % 12;
+    if (keyA.mode === keyB.mode && diff === 0) return { label: "Same key — should lock together cleanly", level: "good" };
+    if (keyA.mode !== keyB.mode) {
+      const relMinorOfA = (keyA.root - 3 + 12) % 12;
+      const relMinorOfB = (keyB.root - 3 + 12) % 12;
+      if (keyA.mode === "major" && keyB.mode === "minor" && relMinorOfA === keyB.root) return { label: "Relative major/minor — compatible", level: "good" };
+      if (keyA.mode === "minor" && keyB.mode === "major" && relMinorOfB === keyA.root) return { label: "Relative major/minor — compatible", level: "good" };
+    }
+    if (keyA.mode === keyB.mode && (diff === 7 || diff === 5)) return { label: "A fifth apart — compatible (energy shift)", level: "good" };
+    if (keyA.mode === keyB.mode && (diff === 2 || diff === 10)) return { label: "A whole step apart — mild clash", level: "warn" };
+    return { label: "Likely dissonant together", level: "bad" };
+  }
+
+  // --- the record bin ---
+  const binEntries = [];
+  function analyzeEntry(midi, name) {
+    let bpm = (midi.header.tempos && midi.header.tempos[0] && midi.header.tempos[0].bpm) || 120;
+    let duration = midi.duration;
+    if (!Number.isFinite(bpm) || bpm <= 0) bpm = 120;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error("couldn't determine a usable duration (empty, zero-length, or an unsupported tempo/division map)");
+    }
+    const info = { midi, bpm, duration };
+    const barsData = analyzeBars(info);
+    const key = detectKey(info);
+    return { id: crypto.randomUUID(), name, midi, bpm, duration, barsData, key };
+  }
+
+  // one slot = one deck (Deck A or Deck B)
+  function makeSlot(name) {
+    const gain = new Tone.Gain(0).toDestination();
+    const melodic = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: name === "A" ? "triangle8" : "sawtooth" },
+      envelope: { attack: 0.01, decay: 0.25, sustain: 0.25, release: 0.4 },
+    });
+    const filter = new Tone.Filter(name === "A" ? 3200 : 2400, "lowpass");
+    melodic.chain(filter, gain);
+
+    const kick = new Tone.MembraneSynth({ envelope: { sustain: 0.001, release: 0.4 } }).connect(gain);
+    const snare = new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.15, sustain: 0 } }).connect(gain);
+    const hat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.08, release: 0.02 }, harmonicity: 5.1, resonance: 4000 }).connect(gain);
+
+    return {
+      name, gain, melodic, filter, kick, snare, hat,
+      midi: null, bpm: 120, duration: 0, barsData: null, key: null, binId: null,
+      melodicPart: null, percPart: null,
+      semitoneShift: { value: 0 },
+      playing: false,
+    };
+  }
+
+  const master = new Tone.Limiter(-3).toDestination();
+  const slotA = makeSlot("A");
+  const slotB = makeSlot("B");
+  slotA.gain.disconnect();
+  slotB.gain.disconnect();
+  slotA.gain.connect(master);
+  slotB.gain.connect(master);
+
+  function buildParts(slot) {
+    if (slot.melodicPart) { slot.melodicPart.dispose(); slot.melodicPart = null; }
+    if (slot.percPart) { slot.percPart.dispose(); slot.percPart = null; }
+    if (!slot.midi) return;
+    const { melodic, perc } = collectNotes(slot.midi);
+
+    if (melodic.length) {
+      slot.melodicPart = new Tone.Part((time, n) => {
+        const freq = Tone.Frequency(n.midi + slot.semitoneShift.value, "midi");
+        slot.melodic.triggerAttackRelease(freq, n.duration, time, Math.max(0.05, n.velocity));
+      }, melodic.map((n) => [n.time, n])).start(0);
+      slot.melodicPart.loop = true;
+      slot.melodicPart.loopEnd = slot.duration;
+    }
+    if (perc.length) {
+      slot.percPart = new Tone.Part((time, n) => {
+        const kind = percKind(n.midi);
+        const v = Math.max(0.05, n.velocity);
+        if (kind === "kick") slot.kick.triggerAttackRelease("C1", "16n", time, v);
+        else if (kind === "snare") slot.snare.triggerAttackRelease("16n", time, v);
+        else slot.hat.triggerAttackRelease("32n", time, v * 0.8);
+      }, perc.map((n) => [n.time, n])).start(0);
+      slot.percPart.loop = true;
+      slot.percPart.loopEnd = slot.duration;
+    }
+  }
+
+  async function ensureAudio() {
+    if (Tone.context.state !== "running") await Tone.start();
+    if (Tone.Transport.state !== "started") Tone.Transport.start();
+  }
+
+  function stopSlot(slot) {
+    if (slot.melodicPart) slot.melodicPart.stop(0);
+    if (slot.percPart) slot.percPart.stop(0);
+    slot.gain.gain.cancelScheduledValues(Tone.now());
+    slot.gain.gain.rampTo(0, 0.1);
+    slot.playing = false;
+  }
+
+  function playSlot(slot, volumeSliderValue) {
+    if (slot.melodicPart) slot.melodicPart.start(0);
+    if (slot.percPart) slot.percPart.start(0);
+    slot.gain.gain.cancelScheduledValues(Tone.now());
+    slot.gain.gain.rampTo(volumeSliderValue / 100, 0.1);
+    slot.playing = true;
+  }
+
+  // --- DOM refs ---
+  const binInput = document.getElementById("binInput");
+  const binList = document.getElementById("binList");
+  const nameA = document.getElementById("nameA");
+  const nameB = document.getElementById("nameB");
+  const bpmA = document.getElementById("bpmA");
+  const bpmB = document.getElementById("bpmB");
+  const keyA = document.getElementById("keyA");
+  const keyB = document.getElementById("keyB");
+  const liveBadgeA = document.getElementById("liveBadgeA");
+  const liveBadgeB = document.getElementById("liveBadgeB");
+  const playA = document.getElementById("playA");
+  const playB = document.getElementById("playB");
+  const stopA = document.getElementById("stopA");
+  const stopB = document.getElementById("stopB");
+  const volA = document.getElementById("volA");
+  const volB = document.getElementById("volB");
+  const volAval = document.getElementById("volAval");
+  const volBval = document.getElementById("volBval");
+  const semA = document.getElementById("semA");
+  const semAval = document.getElementById("semAval");
+  const semB = document.getElementById("semB");
+  const semBval = document.getElementById("semBval");
+  const phraseLenSel = document.getElementById("phraseLenSel");
+  const overlapLenSel = document.getElementById("overlapLenSel");
+  const phraseHeader = document.getElementById("phraseHeader");
+  const phraseSuggest = document.getElementById("phraseSuggest");
+  const phraseTrack = document.getElementById("phraseTrack");
+  const playheadEl = document.getElementById("playhead");
+  const triggerEl = document.getElementById("triggerMarker");
+  const overlapEl = document.getElementById("overlapWindow");
+  const meterA = document.getElementById("meterA");
+  const meterB = document.getElementById("meterB");
+  const harmonyBadge = document.getElementById("harmonyBadge");
+  const applyTranspose = document.getElementById("applyTranspose");
+  const mixStateEl = document.getElementById("mixState");
+  const mixIn = document.getElementById("mixIn");
+  const stopAllBtn = document.getElementById("stopAll");
+
+  const mixState = { phase: "idle", nextPhrase: 0, overlapSec: 0, anchor: null, incoming: null };
+  let focusedSlot = null;
+
+  function getAnchorIncoming() {
+    if (slotA.playing && !slotB.playing) return { anchor: slotA, incoming: slotB };
+    if (slotB.playing && !slotA.playing) return { anchor: slotB, incoming: slotA };
+    return null;
+  }
+
+  function refreshMixInAvailability() {
+    if (mixState.phase !== "idle" && mixState.phase !== "done") return;
+    const roles = getAnchorIncoming();
+    mixIn.disabled = !(roles && roles.incoming.midi);
+  }
+
+  function liveSlotForDisplay() {
+    if (mixState.phase === "armed" || mixState.phase === "crossfading") return mixState.anchor;
+    const roles = getAnchorIncoming();
+    return roles ? roles.anchor : null;
+  }
+
+  function updateLiveBadges() {
+    liveBadgeA.hidden = !slotA.playing;
+    liveBadgeB.hidden = !slotB.playing;
+  }
+
+  function updateLiveFocus() {
+    updateLiveBadges();
+    const target = liveSlotForDisplay();
+    if (target === focusedSlot) return;
+    focusedSlot = target;
+    if (target && target.barsData) {
+      phraseHeader.textContent = `Deck ${target.name} Phrase Grid (live)`;
+      phraseLenSel.value = String(suggestPhraseLength(target.barsData));
+    } else {
+      phraseHeader.textContent = "Phrase Grid";
+    }
+    renderPhraseGrid();
+  }
+
+  function renderPhraseGrid() {
+    phraseTrack.querySelectorAll(".phrase-block, .phrase-tick").forEach((el) => el.remove());
+    const slot = focusedSlot;
+    if (!slot || !slot.midi || !slot.barsData) {
+      phraseSuggest.textContent = "No deck is live yet.";
+      return;
+    }
+    const duration = slot.duration;
+    const barLen = slot.barsData.barLen;
+    const L = parseInt(phraseLenSel.value, 10);
+    const phraseLenSec = barLen * L;
+    const boundaries = phraseBoundaries(slot.barsData, L);
+
+    let p = 0;
+    while (p * phraseLenSec < duration) {
+      const left = (p * phraseLenSec / duration) * 100;
+      const width = Math.min(phraseLenSec, duration - p * phraseLenSec) / duration * 100;
+      const block = document.createElement("div");
+      block.className = "phrase-block" + (p % 2 ? " alt" : "");
+      block.style.left = left + "%";
+      block.style.width = width + "%";
+      phraseTrack.insertBefore(block, playheadEl);
+      p++;
+    }
+    boundaries.forEach((b) => {
+      if (b.time >= duration) return;
+      const tick = document.createElement("div");
+      tick.className = "phrase-tick";
+      tick.style.left = (b.time / duration * 100) + "%";
+      const bar = document.createElement("div");
+      bar.className = "phrase-score-bar";
+      bar.style.height = Math.max(3, b.score * 26) + "px";
+      tick.appendChild(bar);
+      phraseTrack.insertBefore(tick, playheadEl);
+    });
+    phraseSuggest.textContent = `${boundaries.length} candidate boundar${boundaries.length === 1 ? "y" : "ies"} at ${L}-bar grouping`;
+  }
+
+  function updateHarmony() {
+    if (!slotA.key || !slotB.key) {
+      harmonyBadge.textContent = "Load a record into each deck to check harmonic compatibility.";
+      harmonyBadge.className = "harmony-badge";
+      applyTranspose.hidden = true;
+      return;
+    }
+    const compat = keyCompatibility(slotA.key, slotB.key);
+    harmonyBadge.textContent = `Deck A: ${slotA.key.name} · Deck B: ${slotB.key.name} — ${compat.label}`;
+    harmonyBadge.className = "harmony-badge " + compat.level;
+    if (compat.level === "good") { applyTranspose.hidden = true; return; }
+
+    const roles = getAnchorIncoming();
+    const anchor = roles ? roles.anchor : slotA;
+    const target = roles ? roles.incoming : slotB;
+    let shift = ((anchor.key.root - target.key.root) % 12 + 12) % 12;
+    if (shift > 6) shift -= 12;
+    applyTranspose.textContent = `Apply suggested transpose (${shift >= 0 ? "+" : ""}${shift} st) to Deck ${target.name}`;
+    applyTranspose.dataset.shift = shift;
+    applyTranspose.dataset.targetDeck = target.name;
+    applyTranspose.hidden = false;
+  }
+
+  function loadBinEntryIntoDeck(entry, which) {
+    const slot = which === "A" ? slotA : slotB;
+    if (slot.playing || mixState.phase === "armed" || mixState.phase === "crossfading") return;
+    const nameEl = which === "A" ? nameA : nameB;
+    const bpmEl = which === "A" ? bpmA : bpmB;
+    const keyEl = which === "A" ? keyA : keyB;
+    const playBtn = which === "A" ? playA : playB;
+    const semSlider = which === "A" ? semA : semB;
+    const semLabel = which === "A" ? semAval : semBval;
+
+    if (slot.melodicPart) { slot.melodicPart.dispose(); slot.melodicPart = null; }
+    if (slot.percPart) { slot.percPart.dispose(); slot.percPart = null; }
+    slot.gain.gain.cancelScheduledValues(Tone.now());
+    slot.gain.gain.setValueAtTime(0, Tone.now());
+
+    slot.midi = entry.midi;
+    slot.bpm = entry.bpm;
+    slot.duration = entry.duration;
+    slot.barsData = entry.barsData;
+    slot.key = entry.key;
+    slot.binId = entry.id;
+    slot.semitoneShift.value = 0;
+    semSlider.value = 0;
+    semLabel.textContent = "0 st";
+
+    buildParts(slot);
+    nameEl.textContent = entry.name;
+    nameEl.classList.remove("empty");
+    bpmEl.textContent = `${slot.bpm.toFixed(1)} bpm`;
+    keyEl.textContent = slot.key ? `Key: ${slot.key.name} (${Math.round(slot.key.score * 100)}%)` : "Key: no tonal center found";
+    playBtn.disabled = false;
+
+    log(`Loaded "${entry.name}" onto Deck ${which} — ${slot.bpm.toFixed(1)} BPM, ${slot.key ? slot.key.name : "no tonal center"}.`);
+
+    updateHarmony();
+    updateLiveFocus();
+    refreshMixInAvailability();
+    renderBinList();
+  }
+
+  function renderBinList() {
+    binList.innerHTML = "";
+    if (!binEntries.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "No records yet — add a few MIDI files above.";
+      binList.appendChild(p);
+      return;
+    }
+    binEntries.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "bin-row";
+
+      const info = document.createElement("div");
+      info.className = "bin-info";
+      const nameEl = document.createElement("span");
+      nameEl.className = "bin-name";
+      nameEl.textContent = entry.name;
+      const meta = document.createElement("span");
+      meta.className = "bin-meta";
+      meta.textContent = `${entry.bpm.toFixed(1)} bpm · ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"} · ${entry.duration.toFixed(1)}s`;
+      info.appendChild(nameEl);
+      info.appendChild(meta);
+      if (slotA.binId === entry.id) {
+        const tag = document.createElement("span");
+        tag.className = "bin-tag tag-a";
+        tag.textContent = "On Deck A" + (slotA.playing ? " · live" : "");
+        info.appendChild(tag);
+      }
+      if (slotB.binId === entry.id) {
+        const tag = document.createElement("span");
+        tag.className = "bin-tag tag-b";
+        tag.textContent = "On Deck B" + (slotB.playing ? " · live" : "");
+        info.appendChild(tag);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "bin-actions";
+      const mixBusy = mixState.phase === "armed" || mixState.phase === "crossfading";
+      const toA = document.createElement("button");
+      toA.textContent = "→ Deck A";
+      toA.disabled = slotA.playing || mixBusy;
+      toA.addEventListener("click", () => loadBinEntryIntoDeck(entry, "A"));
+      const toB = document.createElement("button");
+      toB.textContent = "→ Deck B";
+      toB.disabled = slotB.playing || mixBusy;
+      toB.addEventListener("click", () => loadBinEntryIntoDeck(entry, "B"));
+      actions.appendChild(toA);
+      actions.appendChild(toB);
+
+      row.appendChild(info);
+      row.appendChild(actions);
+      binList.appendChild(row);
+    });
+  }
+
+  binInput.addEventListener("change", async () => {
+    const files = Array.from(binInput.files || []);
+    for (const file of files) {
+      try {
+        const buf = await file.arrayBuffer();
+        const midi = new Midi(buf);
+        const entry = analyzeEntry(midi, file.name);
+        binEntries.push(entry);
+        log(`Added "${file.name}" to the bin — ${entry.bpm.toFixed(1)} BPM, ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"}.`);
+      } catch (err) {
+        log(`Could not parse "${file.name}" as MIDI: ${err.message}`);
+      }
+    }
+    binInput.value = "";
+    renderBinList();
+  });
+
+  playA.addEventListener("click", async () => {
+    await ensureAudio();
+    playSlot(slotA, volA.value);
+    log("Deck A playing.");
+    updateLiveFocus();
+    refreshMixInAvailability();
+    renderBinList();
+  });
+  stopA.addEventListener("click", () => {
+    stopSlot(slotA);
+    log("Deck A stopped.");
+    updateLiveFocus();
+    refreshMixInAvailability();
+    renderBinList();
+  });
+
+  playB.addEventListener("click", async () => {
+    await ensureAudio();
+    playSlot(slotB, volB.value);
+    log("Deck B playing.");
+    updateLiveFocus();
+    refreshMixInAvailability();
+    renderBinList();
+  });
+  stopB.addEventListener("click", () => {
+    stopSlot(slotB);
+    log("Deck B stopped.");
+    updateLiveFocus();
+    refreshMixInAvailability();
+    renderBinList();
+  });
+
+  volA.addEventListener("input", () => {
+    volAval.textContent = `${volA.value}%`;
+    if (slotA.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotA.gain.gain.rampTo(volA.value / 100, 0.08);
+  });
+  volB.addEventListener("input", () => {
+    volBval.textContent = `${volB.value}%`;
+    if (slotB.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotB.gain.gain.rampTo(volB.value / 100, 0.08);
+  });
+  semA.addEventListener("input", () => {
+    slotA.semitoneShift.value = parseInt(semA.value, 10);
+    semAval.textContent = `${semA.value} st`;
+  });
+  semB.addEventListener("input", () => {
+    slotB.semitoneShift.value = parseInt(semB.value, 10);
+    semBval.textContent = `${semB.value} st`;
+  });
+  phraseLenSel.addEventListener("change", renderPhraseGrid);
+
+  applyTranspose.addEventListener("click", (e) => {
+    const shift = parseInt(e.target.dataset.shift, 10);
+    const deck = e.target.dataset.targetDeck;
+    const slot = deck === "A" ? slotA : slotB;
+    const slider = deck === "A" ? semA : semB;
+    const label = deck === "A" ? semAval : semBval;
+    slider.value = shift;
+    slot.semitoneShift.value = shift;
+    label.textContent = `${shift} st`;
+    log(`Applied suggested transpose: Deck ${deck} shifted ${shift >= 0 ? "+" : ""}${shift} semitones to match the other deck's key.`);
+  });
+
+  mixIn.addEventListener("click", async () => {
+    // Guard re-entrancy synchronously, before any await: without this, a
+    // rapid double-click can fire this handler twice before the first call
+    // reaches "mixIn.disabled = true", double-scheduling the whole mix.
+    if (mixIn.disabled || mixState.phase === "armed" || mixState.phase === "crossfading") return;
+    const roles = getAnchorIncoming();
+    if (!roles || !roles.incoming.midi) return;
+    mixIn.disabled = true;
+    const { anchor, incoming } = roles;
+
+    try {
+    await ensureAudio();
+
+    const barLen = anchor.barsData.barLen;
+    const L = parseInt(phraseLenSel.value, 10);
+    const overlapBars = parseInt(overlapLenSel.value, 10);
+    const phraseLenSec = barLen * L;
+    const overlapSec = barLen * overlapBars;
+
+    const now = Tone.Transport.seconds;
+    const nextPhrase = Math.ceil((now + 0.05) / phraseLenSec) * phraseLenSec;
+
+    const scale = incoming.bpm / anchor.bpm;
+    if (incoming.melodicPart) incoming.melodicPart.dispose();
+    if (incoming.percPart) incoming.percPart.dispose();
+    const { melodic, perc } = collectNotes(incoming.midi);
+    const scaledDuration = incoming.duration * scale;
+
+    if (melodic.length) {
+      incoming.melodicPart = new Tone.Part((time, n) => {
+        const freq = Tone.Frequency(n.midi + incoming.semitoneShift.value, "midi");
+        incoming.melodic.triggerAttackRelease(freq, n.duration * scale, time, Math.max(0.05, n.velocity));
+      }, melodic.map((n) => [n.time * scale, n]));
+      incoming.melodicPart.loop = true;
+      incoming.melodicPart.loopEnd = scaledDuration;
+      incoming.melodicPart.start(nextPhrase);
+    }
+    if (perc.length) {
+      incoming.percPart = new Tone.Part((time, n) => {
+        const kind = percKind(n.midi);
+        const v = Math.max(0.05, n.velocity);
+        if (kind === "kick") incoming.kick.triggerAttackRelease("C1", "16n", time, v);
+        else if (kind === "snare") incoming.snare.triggerAttackRelease("16n", time, v);
+        else incoming.hat.triggerAttackRelease("32n", time, v * 0.8);
+      }, perc.map((n) => [n.time * scale, n]));
+      incoming.percPart.loop = true;
+      incoming.percPart.loopEnd = scaledDuration;
+      incoming.percPart.start(nextPhrase);
+    }
+
+    const incomingVolSlider = incoming === slotA ? volA : volB;
+    const incomingVolLabel = incoming === slotA ? volAval : volBval;
+    if (!(incomingVolSlider.value > 0)) { incomingVolSlider.value = 80; incomingVolLabel.textContent = "80%"; }
+    const targetVolIncoming = incomingVolSlider.value / 100;
+
+    // Gain automation needs the AudioContext-absolute time a scheduled
+    // callback receives, not the Transport-relative "nextPhrase" seconds —
+    // passing Transport time straight into setValueAtTime/linearRamp
+    // schedules it against the wrong clock (usually collapsing to an
+    // instant jump instead of a ramp). Tone.Transport.schedule's callback
+    // gives us the correctly-aligned absolute time to use instead.
+    Tone.Transport.schedule((time) => {
+      const currentAnchorVal = anchor.gain.gain.value;
+      incoming.gain.gain.cancelScheduledValues(time);
+      incoming.gain.gain.setValueAtTime(0, time);
+      incoming.gain.gain.linearRampToValueAtTime(targetVolIncoming, time + overlapSec);
+
+      anchor.gain.gain.cancelScheduledValues(time);
+      anchor.gain.gain.setValueAtTime(currentAnchorVal, time);
+      anchor.gain.gain.linearRampToValueAtTime(0, time + overlapSec);
+    }, nextPhrase);
+
+    incoming.playing = true;
+    mixState.phase = "armed";
+    mixState.anchor = anchor;
+    mixState.incoming = incoming;
+    mixState.nextPhrase = nextPhrase;
+    mixState.overlapSec = overlapSec;
+    triggerEl.hidden = false;
+    overlapEl.hidden = true;
+    updateLiveFocus();
+    renderBinList();
+
+    const barNum = Math.round(nextPhrase / barLen) + 1;
+    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.bpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter on its own downbeat at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
+
+    Tone.Transport.scheduleOnce(() => {
+      try {
+        if (anchor.melodicPart) anchor.melodicPart.stop();
+        if (anchor.percPart) anchor.percPart.stop();
+        anchor.playing = false;
+        mixState.phase = "done";
+        triggerEl.hidden = true;
+        overlapEl.hidden = true;
+        mixStateEl.textContent = `Done — Deck ${anchor.name} faded out and stopped. Deck ${incoming.name} is now live. Load a fresh record into Deck ${anchor.name} to keep the set going.`;
+        mixIn.disabled = false;
+        updateLiveFocus();
+        refreshMixInAvailability();
+        renderBinList();
+        log(`Crossfade complete. Deck ${anchor.name} stopped; Deck ${incoming.name} continues solo.`);
+      } catch (err) {
+        log(`Error finishing the crossfade: ${err.message}`);
+        mixIn.disabled = false;
+      }
+    }, nextPhrase + overlapSec + 0.02);
+    } catch (err) {
+      log(`Beatmatch Mix failed to start: ${err.message}`);
+      mixState.phase = "idle";
+      mixState.anchor = null;
+      mixState.incoming = null;
+      triggerEl.hidden = true;
+      overlapEl.hidden = true;
+      mixStateEl.textContent = "Something went wrong starting the mix — see the log below. Try again.";
+      mixIn.disabled = false;
+      refreshMixInAvailability();
+    }
+  });
+
+  stopAllBtn.addEventListener("click", () => {
+    stopSlot(slotA);
+    stopSlot(slotB);
+    mixState.phase = "idle";
+    mixState.anchor = null;
+    mixState.incoming = null;
+    triggerEl.hidden = true;
+    overlapEl.hidden = true;
+    mixStateEl.textContent = "Idle. Press Play on a deck to start the set, load a record into the other deck, then press Beatmatch Mix.";
+    updateLiveFocus();
+    refreshMixInAvailability();
+    renderBinList();
+    log("Stopped all decks.");
+  });
+
+  function frame() {
+    const slot = focusedSlot;
+    if (slot && slot.duration > 0) {
+      const t = Tone.Transport.seconds % slot.duration;
+      playheadEl.style.left = (t / slot.duration * 100) + "%";
+      playheadEl.hidden = false;
+    } else {
+      playheadEl.hidden = true;
+    }
+
+    meterA.style.width = Math.min(100, slotA.gain.gain.value * 100) + "%";
+    meterB.style.width = Math.min(100, slotB.gain.gain.value * 100) + "%";
+
+    if (mixState.phase === "armed") {
+      const anchor = mixState.anchor;
+      const remaining = mixState.nextPhrase - Tone.Transport.seconds;
+      if (remaining <= 0) {
+        mixState.phase = "crossfading";
+      } else {
+        const barNum = Math.round(mixState.nextPhrase / anchor.barsData.barLen) + 1;
+        mixStateEl.textContent = `Armed — waiting for the next phrase boundary (bar ${barNum} of Deck ${anchor.name}) in ${remaining.toFixed(1)}s.`;
+        if (anchor.duration > 0) {
+          triggerEl.style.left = ((mixState.nextPhrase % anchor.duration) / anchor.duration * 100) + "%";
+        }
+      }
+    } else if (mixState.phase === "crossfading") {
+      const anchor = mixState.anchor, incoming = mixState.incoming;
+      const elapsed = Tone.Transport.seconds - mixState.nextPhrase;
+      const pct = Math.min(100, Math.round(elapsed / mixState.overlapSec * 100));
+      mixStateEl.textContent = `Crossfading… ${pct}% — Deck ${incoming.name} fading in, Deck ${anchor.name} fading out.`;
+      if (anchor.duration > 0) {
+        const leftPct = (mixState.nextPhrase % anchor.duration) / anchor.duration * 100;
+        const widthPct = Math.min(100 - leftPct, (mixState.overlapSec / anchor.duration) * 100);
+        overlapEl.style.left = leftPct + "%";
+        overlapEl.style.width = widthPct + "%";
+        overlapEl.hidden = false;
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  log("Ready. Add a few MIDI files to the bin, load one onto Deck A and press Play, load another onto Deck B, then press Beatmatch Mix.");
+})();
+</script>
