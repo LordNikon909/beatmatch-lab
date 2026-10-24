@@ -339,6 +339,13 @@ button.stopall { background: transparent; }
     logEl.scrollTop = logEl.scrollHeight;
   }
 
+  // @tonejs/midi sometimes throws a plain string instead of an Error (e.g.
+  // on a malformed time-signature event), so err.message alone can come
+  // back "undefined" — normalize both shapes before logging.
+  function errText(err) {
+    return (err && err.message) ? err.message : String(err);
+  }
+
   function percKind(midiNum) {
     if (midiNum === 35 || midiNum === 36) return "kick";
     if (midiNum === 38 || midiNum === 40) return "snare";
@@ -813,7 +820,7 @@ button.stopall { background: transparent; }
         binEntries.push(entry);
         log(`Added "${file.name}" to the bin — ${entry.bpm.toFixed(1)} BPM, ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"}.`);
       } catch (err) {
-        log(`Could not parse "${file.name}" as MIDI: ${err.message}`);
+        log(`Could not parse "${file.name}" as MIDI: ${errText(err)}`);
       }
     }
     binInput.value = "";
@@ -983,12 +990,12 @@ button.stopall { background: transparent; }
         renderBinList();
         log(`Crossfade complete. Deck ${anchor.name} stopped; Deck ${incoming.name} continues solo.`);
       } catch (err) {
-        log(`Error finishing the crossfade: ${err.message}`);
+        log(`Error finishing the crossfade: ${errText(err)}`);
         mixIn.disabled = false;
       }
     }, nextPhrase + overlapSec + 0.02);
     } catch (err) {
-      log(`Beatmatch Mix failed to start: ${err.message}`);
+      log(`Beatmatch Mix failed to start: ${errText(err)}`);
       mixState.phase = "idle";
       mixState.anchor = null;
       mixState.incoming = null;
@@ -1057,6 +1064,37 @@ button.stopall { background: transparent; }
   }
   requestAnimationFrame(frame);
 
+  // --- preload the local midis/ folder into the bin on startup ---
+  async function preloadBin() {
+    let manifest;
+    try {
+      const res = await fetch("midis/manifest.json");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      manifest = await res.json();
+    } catch (err) {
+      log(`No preload manifest found at midis/manifest.json (${errText(err)}) — add records manually instead.`);
+      return;
+    }
+    let loaded = 0, failed = 0;
+    for (const name of manifest) {
+      try {
+        const res = await fetch(`midis/${encodeURIComponent(name)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = await res.arrayBuffer();
+        const midi = new Midi(buf);
+        const entry = analyzeEntry(midi, name);
+        binEntries.push(entry);
+        loaded++;
+      } catch (err) {
+        failed++;
+        log(`Could not preload "${name}": ${errText(err)}`);
+      }
+    }
+    renderBinList();
+    log(`Preloaded ${loaded} record(s) from midis/ into the bin${failed ? ` (${failed} failed — see above)` : ""}.`);
+  }
+
   log("Ready. Add a few MIDI files to the bin, load one onto Deck A and press Play, load another onto Deck B, then press Beatmatch Mix.");
+  preloadBin();
 })();
 </script>
