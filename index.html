@@ -321,13 +321,14 @@ button.stopall { background: transparent; }
       <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
       <button class="stopall" id="stopAll">Stop All</button>
     </div>
-    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Assumes 4/4 time and that a record's own MIDI start is its downbeat. Phrase detection is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material.</p>
+    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Assumes 4/4 time and that a record's own MIDI start is its downbeat. Phrase detection is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Melodic tracks play through real sampled GM instruments (MusyngKite soundfont, matched to each track's own declared instrument) with a touch of reverb; percussion still triggers simple synthesized hits.</p>
     <div class="log" id="log"></div>
   </div>
 </div>
 
 <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
 <script src="https://unpkg.com/@tonejs/midi@2.0.28/build/Midi.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
 <script>
 (function () {
   "use strict";
@@ -353,17 +354,28 @@ button.stopall { background: transparent; }
     return "kick";
   }
 
+  // `melodic` stays a flat array (for phrase/key analysis, which doesn't
+  // care about instrument identity); `melodicTracks` additionally keeps
+  // each track's own GM program number so playback can use the matching
+  // sampled instrument instead of one generic voice for everything.
   function collectNotes(midi) {
     const melodic = [];
     const perc = [];
+    const melodicTracks = [];
     midi.tracks.forEach((track) => {
       const isPerc = !!(track.instrument && track.instrument.percussion) || track.channel === 9;
-      track.notes.forEach((n) => {
-        const entry = { time: n.time, duration: n.duration, velocity: n.velocity, midi: n.midi };
-        (isPerc ? perc : melodic).push(entry);
-      });
+      if (isPerc) {
+        track.notes.forEach((n) => {
+          perc.push({ time: n.time, duration: n.duration, velocity: n.velocity, midi: n.midi });
+        });
+        return;
+      }
+      const program = (track.instrument && Number.isFinite(track.instrument.number)) ? track.instrument.number : 0;
+      const notes = track.notes.map((n) => ({ time: n.time, duration: n.duration, velocity: n.velocity, midi: n.midi }));
+      notes.forEach((n) => melodic.push(n));
+      if (notes.length) melodicTracks.push({ program, notes });
     });
-    return { melodic, perc };
+    return { melodic, perc, melodicTracks };
   }
 
   // --- phrase analysis (heuristic self-similarity over bar-bucketed note content) ---
@@ -480,6 +492,42 @@ button.stopall { background: transparent; }
     return { label: "Likely dissonant together", level: "bad" };
   }
 
+  // General MIDI program 0-127 -> soundfont-player's instrument name slugs
+  const GM_INSTRUMENT_NAMES = [
+    "acoustic_grand_piano", "bright_acoustic_piano", "electric_grand_piano", "honkytonk_piano",
+    "electric_piano_1", "electric_piano_2", "harpsichord", "clavinet",
+    "celesta", "glockenspiel", "music_box", "vibraphone",
+    "marimba", "xylophone", "tubular_bells", "dulcimer",
+    "drawbar_organ", "percussive_organ", "rock_organ", "church_organ",
+    "reed_organ", "accordion", "harmonica", "tango_accordion",
+    "acoustic_guitar_nylon", "acoustic_guitar_steel", "electric_guitar_jazz", "electric_guitar_clean",
+    "electric_guitar_muted", "overdriven_guitar", "distortion_guitar", "guitar_harmonics",
+    "acoustic_bass", "electric_bass_finger", "electric_bass_pick", "fretless_bass",
+    "slap_bass_1", "slap_bass_2", "synth_bass_1", "synth_bass_2",
+    "violin", "viola", "cello", "contrabass",
+    "tremolo_strings", "pizzicato_strings", "orchestral_harp", "timpani",
+    "string_ensemble_1", "string_ensemble_2", "synth_strings_1", "synth_strings_2",
+    "choir_aahs", "voice_oohs", "synth_choir", "orchestra_hit",
+    "trumpet", "trombone", "tuba", "muted_trumpet",
+    "french_horn", "brass_section", "synth_brass_1", "synth_brass_2",
+    "soprano_sax", "alto_sax", "tenor_sax", "baritone_sax",
+    "oboe", "english_horn", "bassoon", "clarinet",
+    "piccolo", "flute", "recorder", "pan_flute",
+    "blown_bottle", "shakuhachi", "whistle", "ocarina",
+    "lead_1_square", "lead_2_sawtooth", "lead_3_calliope", "lead_4_chiff",
+    "lead_5_charang", "lead_6_voice", "lead_7_fifths", "lead_8_bass__lead",
+    "pad_1_new_age", "pad_2_warm", "pad_3_polysynth", "pad_4_choir",
+    "pad_5_bowed", "pad_6_metallic", "pad_7_halo", "pad_8_sweep",
+    "fx_1_rain", "fx_2_soundtrack", "fx_3_crystal", "fx_4_atmosphere",
+    "fx_5_brightness", "fx_6_goblins", "fx_7_echoes", "fx_8_scifi",
+    "sitar", "banjo", "shamisen", "koto",
+    "kalimba", "bagpipe", "fiddle", "shanai",
+    "tinkle_bell", "agogo", "steel_drums", "woodblock",
+    "taiko_drum", "melodic_tom", "synth_drum", "reverse_cymbal",
+    "guitar_fret_noise", "breath_noise", "seashore", "bird_tweet",
+    "telephone_ring", "helicopter", "applause", "gunshot",
+  ];
+
   // --- the record bin ---
   const binEntries = [];
   function analyzeEntry(midi, name) {
@@ -498,59 +546,148 @@ button.stopall { background: transparent; }
   // one slot = one deck (Deck A or Deck B)
   function makeSlot(name) {
     const gain = new Tone.Gain(0).toDestination();
-    const melodic = new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: name === "A" ? "triangle8" : "sawtooth" },
-      envelope: { attack: 0.01, decay: 0.25, sustain: 0.25, release: 0.4 },
-    });
-    const filter = new Tone.Filter(name === "A" ? 3200 : 2400, "lowpass");
-    melodic.chain(filter, gain);
+
+    // soundfont-player renders each instrument into a plain native
+    // AudioNode destination (fixed at instrument-creation time, no
+    // per-note override), so every sampled note for this deck lands on
+    // this native bus, bridged once into the deck's own Tone.Gain — the
+    // same gain the crossfade automation ramps — via Tone.connect.
+    const instrumentBus = Tone.context.rawContext.createGain();
+    Tone.connect(instrumentBus, gain);
 
     const kick = new Tone.MembraneSynth({ envelope: { sustain: 0.001, release: 0.4 } }).connect(gain);
     const snare = new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.15, sustain: 0 } }).connect(gain);
     const hat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.08, release: 0.02 }, harmonicity: 5.1, resonance: 4000 }).connect(gain);
 
     return {
-      name, gain, melodic, filter, kick, snare, hat,
+      name, gain, instrumentBus, kick, snare, hat,
       midi: null, bpm: 120, duration: 0, barsData: null, key: null, binId: null,
-      melodicPart: null, percPart: null,
+      melodicParts: [], percPart: null,
       semitoneShift: { value: 0 },
       playing: false,
     };
   }
 
+  // a little reverb send makes the sampled instruments sit together as one
+  // room instead of each note sounding dry and isolated
+  const reverb = new Tone.Reverb({ decay: 2.6, preDelay: 0.02, wet: 0.28 });
   const master = new Tone.Limiter(-3).toDestination();
+  reverb.connect(master);
+  reverb.generate().catch((err) => log(`Reverb failed to generate, continuing dry: ${errText(err)}`));
+
   const slotA = makeSlot("A");
   const slotB = makeSlot("B");
   slotA.gain.disconnect();
   slotB.gain.disconnect();
-  slotA.gain.connect(master);
-  slotB.gain.connect(master);
+  slotA.gain.connect(reverb);
+  slotB.gain.connect(reverb);
 
-  function buildParts(slot) {
-    if (slot.melodicPart) { slot.melodicPart.dispose(); slot.melodicPart = null; }
+  // GM instrument samples are loaded once per (deck, program) pair and
+  // cached — soundfont-player ties an instrument's output to a fixed
+  // destination at creation time, so each deck needs its own instance
+  // even when both decks use the same GM program simultaneously.
+  const instrumentCache = new Map();
+  function getInstrument(slot, program) {
+    const key = `${slot.name}:${program}`;
+    if (!instrumentCache.has(key)) {
+      const name = GM_INSTRUMENT_NAMES[program] || "acoustic_grand_piano";
+      const promise = Soundfont.instrument(Tone.context.rawContext, name, {
+        soundfont: "MusyngKite",
+        destination: slot.instrumentBus,
+      }).catch((err) => { instrumentCache.delete(key); throw err; });
+      instrumentCache.set(key, promise);
+    }
+    return instrumentCache.get(key);
+  }
+
+  // Resolve every instrument a set of tracks needs BEFORE doing anything
+  // time-sensitive with the result: this can take a while on a cold
+  // cache (network fetch + decode), and mixIn in particular schedules
+  // against a `nextPhrase` computed from the live Transport clock, which
+  // must not go stale while we wait.
+  async function resolveInstruments(slot, melodicTracks) {
+    return Promise.all(melodicTracks.map(async (track) => {
+      try {
+        return await getInstrument(slot, track.program);
+      } catch (err) {
+        log(`Couldn't load instrument "${GM_INSTRUMENT_NAMES[track.program] || track.program}" for Deck ${slot.name}: ${errText(err)}`);
+        return null;
+      }
+    }));
+  }
+
+  // Purely synchronous: build and start Tone.Parts once instruments are
+  // already resolved, so this never introduces timing drift of its own.
+  function buildMelodicParts(slot, melodicTracks, instruments, timeScale, startAt, loopEnd) {
+    const parts = [];
+    melodicTracks.forEach((track, i) => {
+      const instrument = instruments[i];
+      if (!instrument) return;
+      const part = new Tone.Part((time, n) => {
+        instrument.play(n.midi + slot.semitoneShift.value, time, {
+          duration: n.duration * timeScale,
+          gain: Math.max(0.05, n.velocity),
+        });
+      }, track.notes.map((n) => [n.time * timeScale, n]));
+      part.loop = true;
+      part.loopEnd = loopEnd;
+      part.start(startAt);
+      parts.push(part);
+    });
+    return parts;
+  }
+
+  async function buildParts(slot) {
+    slot.melodicParts.forEach((p) => p.dispose());
+    slot.melodicParts = [];
     if (slot.percPart) { slot.percPart.dispose(); slot.percPart = null; }
     if (!slot.midi) return;
-    const { melodic, perc } = collectNotes(slot.midi);
+    const { perc, melodicTracks } = collectNotes(slot.midi);
 
-    if (melodic.length) {
-      slot.melodicPart = new Tone.Part((time, n) => {
-        const freq = Tone.Frequency(n.midi + slot.semitoneShift.value, "midi");
-        slot.melodic.triggerAttackRelease(freq, n.duration, time, Math.max(0.05, n.velocity));
-      }, melodic.map((n) => [n.time, n])).start(0);
-      slot.melodicPart.loop = true;
-      slot.melodicPart.loopEnd = slot.duration;
-    }
+    const instruments = await resolveInstruments(slot, melodicTracks);
+    slot.melodicParts = buildMelodicParts(slot, melodicTracks, instruments, 1, 0, slot.duration);
+
     if (perc.length) {
       slot.percPart = new Tone.Part((time, n) => {
         const kind = percKind(n.midi);
         const v = Math.max(0.05, n.velocity);
-        if (kind === "kick") slot.kick.triggerAttackRelease("C1", "16n", time, v);
-        else if (kind === "snare") slot.snare.triggerAttackRelease("16n", time, v);
-        else slot.hat.triggerAttackRelease("32n", time, v * 0.8);
+        try {
+          if (kind === "kick") slot.kick.triggerAttackRelease("C1", "16n", time, v);
+          else if (kind === "snare") slot.snare.triggerAttackRelease("16n", time, v);
+          else slot.hat.triggerAttackRelease("32n", time, v * 0.8);
+        } catch (err) {
+          // Two hits of the same kind landed too close together for this
+          // shared single-voice synth to retrigger in time (dense real
+          // drum tracks hit this); drop the hit rather than throw inside
+          // Tone's scheduler.
+        }
       }, perc.map((n) => [n.time, n])).start(0);
       slot.percPart.loop = true;
       slot.percPart.loopEnd = slot.duration;
     }
+  }
+
+  // Scan a set of bin entries for every distinct GM program they use and
+  // start loading all of them, for both decks, right away — so by the
+  // time the user actually loads a record onto a deck, getInstrument()
+  // is almost always a cache hit instead of a mid-mix network fetch.
+  async function preloadInstruments(entries) {
+    const programs = new Set();
+    entries.forEach((entry) => {
+      entry.midi.tracks.forEach((track) => {
+        const isPerc = !!(track.instrument && track.instrument.percussion) || track.channel === 9;
+        if (!isPerc && track.notes.length) {
+          programs.add((track.instrument && Number.isFinite(track.instrument.number)) ? track.instrument.number : 0);
+        }
+      });
+    });
+    if (!programs.size) return;
+    const jobs = [];
+    programs.forEach((p) => { jobs.push(getInstrument(slotA, p)); jobs.push(getInstrument(slotB, p)); });
+    log(`Preloading ${programs.size} GM instrument voice(s) for both decks…`);
+    const results = await Promise.allSettled(jobs);
+    const failed = results.filter((r) => r.status === "rejected").length;
+    log(`Instrument preload done${failed ? ` (${failed} voice(s) failed — affected tracks will stay silent)` : ""}.`);
   }
 
   async function ensureAudio() {
@@ -559,7 +696,7 @@ button.stopall { background: transparent; }
   }
 
   function stopSlot(slot) {
-    if (slot.melodicPart) slot.melodicPart.stop(0);
+    slot.melodicParts.forEach((p) => p.stop(0));
     if (slot.percPart) slot.percPart.stop(0);
     slot.gain.gain.cancelScheduledValues(Tone.now());
     slot.gain.gain.rampTo(0, 0.1);
@@ -567,8 +704,12 @@ button.stopall { background: transparent; }
   }
 
   function playSlot(slot, volumeSliderValue) {
-    if (slot.melodicPart) slot.melodicPart.start(0);
-    if (slot.percPart) slot.percPart.start(0);
+    // buildParts already started these (silently, at gain 0) so a loaded
+    // deck stays phase-locked while idle — only (re)start a part here if
+    // stopSlot actually stopped it; calling .start() on an already-started
+    // part throws ("Start time must be strictly greater than previous...").
+    slot.melodicParts.forEach((p) => { if (p.state !== "started") p.start(0); });
+    if (slot.percPart && slot.percPart.state !== "started") slot.percPart.start(0);
     slot.gain.gain.cancelScheduledValues(Tone.now());
     slot.gain.gain.rampTo(volumeSliderValue / 100, 0.1);
     slot.playing = true;
@@ -714,7 +855,7 @@ button.stopall { background: transparent; }
     applyTranspose.hidden = false;
   }
 
-  function loadBinEntryIntoDeck(entry, which) {
+  async function loadBinEntryIntoDeck(entry, which) {
     const slot = which === "A" ? slotA : slotB;
     if (slot.playing || mixState.phase === "armed" || mixState.phase === "crossfading") return;
     const nameEl = which === "A" ? nameA : nameB;
@@ -724,8 +865,6 @@ button.stopall { background: transparent; }
     const semSlider = which === "A" ? semA : semB;
     const semLabel = which === "A" ? semAval : semBval;
 
-    if (slot.melodicPart) { slot.melodicPart.dispose(); slot.melodicPart = null; }
-    if (slot.percPart) { slot.percPart.dispose(); slot.percPart = null; }
     slot.gain.gain.cancelScheduledValues(Tone.now());
     slot.gain.gain.setValueAtTime(0, Tone.now());
 
@@ -739,7 +878,7 @@ button.stopall { background: transparent; }
     semSlider.value = 0;
     semLabel.textContent = "0 st";
 
-    buildParts(slot);
+    await buildParts(slot);
     nameEl.textContent = entry.name;
     nameEl.classList.remove("empty");
     bpmEl.textContent = `${slot.bpm.toFixed(1)} bpm`;
@@ -819,6 +958,7 @@ button.stopall { background: transparent; }
         const entry = analyzeEntry(midi, file.name);
         binEntries.push(entry);
         log(`Added "${file.name}" to the bin — ${entry.bpm.toFixed(1)} BPM, ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"}.`);
+        preloadInstruments([entry]);
       } catch (err) {
         log(`Could not parse "${file.name}" as MIDI: ${errText(err)}`);
       }
@@ -902,6 +1042,13 @@ button.stopall { background: transparent; }
     try {
     await ensureAudio();
 
+    // Resolve the incoming deck's instruments BEFORE computing nextPhrase:
+    // this can take a moment on a cold cache, and everything below is
+    // timed against the live Transport clock, which must not go stale
+    // while we wait on a network fetch.
+    const { perc, melodicTracks } = collectNotes(incoming.midi);
+    const instruments = await resolveInstruments(incoming, melodicTracks);
+
     const barLen = anchor.barsData.barLen;
     const L = parseInt(phraseLenSel.value, 10);
     const overlapBars = parseInt(overlapLenSel.value, 10);
@@ -912,27 +1059,23 @@ button.stopall { background: transparent; }
     const nextPhrase = Math.ceil((now + 0.05) / phraseLenSec) * phraseLenSec;
 
     const scale = incoming.bpm / anchor.bpm;
-    if (incoming.melodicPart) incoming.melodicPart.dispose();
+    incoming.melodicParts.forEach((p) => p.dispose());
     if (incoming.percPart) incoming.percPart.dispose();
-    const { melodic, perc } = collectNotes(incoming.midi);
     const scaledDuration = incoming.duration * scale;
 
-    if (melodic.length) {
-      incoming.melodicPart = new Tone.Part((time, n) => {
-        const freq = Tone.Frequency(n.midi + incoming.semitoneShift.value, "midi");
-        incoming.melodic.triggerAttackRelease(freq, n.duration * scale, time, Math.max(0.05, n.velocity));
-      }, melodic.map((n) => [n.time * scale, n]));
-      incoming.melodicPart.loop = true;
-      incoming.melodicPart.loopEnd = scaledDuration;
-      incoming.melodicPart.start(nextPhrase);
-    }
+    incoming.melodicParts = buildMelodicParts(incoming, melodicTracks, instruments, scale, nextPhrase, scaledDuration);
+
     if (perc.length) {
       incoming.percPart = new Tone.Part((time, n) => {
         const kind = percKind(n.midi);
         const v = Math.max(0.05, n.velocity);
-        if (kind === "kick") incoming.kick.triggerAttackRelease("C1", "16n", time, v);
-        else if (kind === "snare") incoming.snare.triggerAttackRelease("16n", time, v);
-        else incoming.hat.triggerAttackRelease("32n", time, v * 0.8);
+        try {
+          if (kind === "kick") incoming.kick.triggerAttackRelease("C1", "16n", time, v);
+          else if (kind === "snare") incoming.snare.triggerAttackRelease("16n", time, v);
+          else incoming.hat.triggerAttackRelease("32n", time, v * 0.8);
+        } catch (err) {
+          // see buildParts' identical guard above
+        }
       }, perc.map((n) => [n.time * scale, n]));
       incoming.percPart.loop = true;
       incoming.percPart.loopEnd = scaledDuration;
@@ -977,7 +1120,7 @@ button.stopall { background: transparent; }
 
     Tone.Transport.scheduleOnce(() => {
       try {
-        if (anchor.melodicPart) anchor.melodicPart.stop();
+        anchor.melodicParts.forEach((p) => p.stop());
         if (anchor.percPart) anchor.percPart.stop();
         anchor.playing = false;
         mixState.phase = "done";
@@ -1101,6 +1244,7 @@ button.stopall { background: transparent; }
     }
     renderBinList();
     log(`Preloaded ${loaded} record(s) from midis/ into the bin${failed ? ` (${failed} failed — see above)` : ""}.`);
+    preloadInstruments(binEntries);
   }
 
   log("Ready. Add a few MIDI files to the bin, load one onto Deck A and press Play, load another onto Deck B, then press Beatmatch Mix.");
