@@ -10,7 +10,21 @@ It's a single static page with no build step. Any static file server works, e.g.
 python3 -m http.server 8000
 ```
 
-Then open `http://localhost:8000/index.html`.
+Then open `http://localhost:8000/index.html`. (Needs an actual http server — `fetch()` for the preloaded bin won't work over a bare `file://` URL.)
+
+## The record bin
+
+Drop `.mid`/`.midi` files into `midis/`, then regenerate the manifest it preloads from on startup:
+
+```bash
+cd midis && python3 -c "
+import json, os
+files = sorted(f for f in os.listdir('.') if f.lower().endswith(('.mid', '.midi')))
+json.dump(files, open('manifest.json', 'w'), indent=2, ensure_ascii=False)
+"
+```
+
+You can still add more records manually from the page at any time — the preload just saves re-uploading the same set every session.
 
 ## What it does
 
