@@ -787,6 +787,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   function renderBinList() {
     binList.innerHTML = "";
+    if (!slotA || !slotB) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "Sampler engine isn't running — see the log below.";
+      binList.appendChild(p);
+      return;
+    }
     if (!binEntries.length) {
       const p = document.createElement("p");
       p.className = "hint";
@@ -892,11 +899,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   volA.addEventListener("input", () => {
     volAval.textContent = `${volA.value}%`;
-    if (slotA.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotA.gain.gain.rampTo(volA.value / 100, 0.08);
+    if (slotA && slotA.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotA.gain.gain.rampTo(volA.value / 100, 0.08);
   });
   volB.addEventListener("input", () => {
     volBval.textContent = `${volB.value}%`;
-    if (slotB.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotB.gain.gain.rampTo(volB.value / 100, 0.08);
+    if (slotB && slotB.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotB.gain.gain.rampTo(volB.value / 100, 0.08);
   });
   semA.addEventListener("input", () => {
     slotA.semitoneShift.value = parseInt(semA.value, 10);

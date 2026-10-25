@@ -4,13 +4,17 @@ A browser proof-of-concept exploring an RPG battle-screen mechanic built around 
 
 ## Running it
 
-It's a single static page with no build step. Any static file server works, e.g.:
+**Don't open `index.html` directly (double-clicking it loads it as a `file://` URL)** — browsers block the fetches this app needs (the bin preload, the AudioWorklet module, the soundfont) from `file://`, so nothing will load and the console fills with CORS/module errors.
+
+Easiest: double-click **`Start Beat Match Lab.command`**. It starts a local server and opens your browser to it. Leave that terminal window open while you use the app; closing it (or Ctrl+C) stops the server.
+
+Or run any static file server yourself, e.g.:
 
 ```bash
 python3 -m http.server 8000
 ```
 
-Then open `http://localhost:8000/index.html`. (Needs an actual http server — `fetch()` for the preloaded bin won't work over a bare `file://` URL.)
+and open `http://localhost:8000/index.html`.
 
 ## The record bin
 
