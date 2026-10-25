@@ -668,14 +668,21 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const { events, programs } = collectNotes(slot.midi);
     programs.forEach((program, channel) => slot.synth.programChange(channel, program));
 
+    // Set loop/loopEnd BEFORE start(), not after: measured on a real
+    // 8382-event track, start-then-loop took ~1.7s (looks like Tone
+    // tries to pre-schedule loop repetitions while loopEnd is still at
+    // its default/degenerate value); loop-then-start took ~300ms for
+    // the same data — same fix brought a 16718-event track from ~9.3s
+    // to ~0.6s. Order, not event count, was the real cost here.
     slot.eventsPart = new Tone.Part((time, ev) => {
       const nt = toNativeTime(time);
       const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
       if (ev.type === "on") slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
       else slot.synth.noteOff(ev.channel, note, { time: nt });
-    }, events.map((ev) => [ev.time, ev])).start(0);
+    }, events.map((ev) => [ev.time, ev]));
     slot.eventsPart.loop = true;
     slot.eventsPart.loopEnd = slot.duration;
+    slot.eventsPart.start(0);
   }
 
   async function ensureAudio() {
