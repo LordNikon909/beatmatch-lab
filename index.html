@@ -575,6 +575,21 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return `${m}:${String(s).padStart(2, "0")}`;
   }
 
+  // We drive the synth with discrete noteOn/noteOff messages scheduled
+  // by a Tone.Part — tearing that Part down (a new record loads, Stop
+  // is pressed, a mix finishes) only cancels its FUTURE callbacks. Any
+  // note that already got its noteOn but whose matching noteOff hadn't
+  // fired yet never gets told to stop, so the synth just keeps that
+  // voice held. MIDI's standard "All Notes Off" CC (123) is exactly the
+  // message a real synth expects for this — send it on every channel,
+  // right now, whenever we tear down a deck's Part.
+  function silenceSynth(slot) {
+    const now = nativeCtx.currentTime;
+    for (let ch = 0; ch < 16; ch++) {
+      slot.synth.controllerChange(ch, 123, 0, { time: now });
+    }
+  }
+
   // one slot = one deck (Deck A or Deck B)
   function makeSlot(name) {
     // Both the synth and its volume-control gain live on nativeCtx, same
@@ -643,7 +658,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   function buildParts(slot) {
-    if (slot.eventsPart) { slot.eventsPart.dispose(); slot.eventsPart = null; }
+    if (slot.eventsPart) {
+      slot.eventsPart.dispose();
+      slot.eventsPart = null;
+      silenceSynth(slot);
+    }
     if (!slot.midi) return;
     const { events, programs } = collectNotes(slot.midi);
     programs.forEach((program, channel) => slot.synth.programChange(channel, program));
@@ -669,6 +688,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   function stopSlot(slot) {
     if (slot.eventsPart) slot.eventsPart.stop(0);
+    silenceSynth(slot);
     nativeRampTo(slot.gain.gain, 0, 0.1);
     slot.playing = false;
   }
@@ -1048,7 +1068,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const nextPhrase = anchor.transportStartOffset + nextPhraseElapsed;
 
     const scale = incoming.bpm / anchor.effectiveBpm;
-    if (incoming.eventsPart) incoming.eventsPart.dispose();
+    if (incoming.eventsPart) { incoming.eventsPart.dispose(); silenceSynth(incoming); }
     const scaledDuration = incoming.duration * scale;
 
     incoming.eventsPart = new Tone.Part((time, ev) => {
@@ -1101,6 +1121,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     Tone.Transport.scheduleOnce(() => {
       try {
         if (anchor.eventsPart) anchor.eventsPart.stop();
+        silenceSynth(anchor);
         anchor.playing = false;
         mixState.phase = "done";
         triggerEl.hidden = true;
