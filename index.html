@@ -161,6 +161,12 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); z-index: 3; }
 .trigger-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent-b); z-index: 2; }
 .overlap-window { position: absolute; top: 0; bottom: 0; background: rgba(79,214,255,0.16); z-index: 1; }
+.phrase-clock {
+  font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
+  color: var(--fg); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;
+}
+.phrase-clock-sep { color: var(--fg-dim); }
+.phrase-clock-dim { color: var(--fg-dim); }
 .phrase-legend { font-size: 11.5px; color: var(--fg-dim); line-height: 1.5; }
 
 .meter-row { display: flex; gap: 18px; }
@@ -278,6 +284,15 @@ button.stopall { background: transparent; }
         <div class="playhead" id="playhead" hidden></div>
         <div class="trigger-marker" id="triggerMarker" hidden></div>
         <div class="overlap-window" id="overlapWindow" hidden></div>
+      </div>
+      <div class="phrase-clock" id="phraseClock">
+        <span id="timeElapsed">—:—</span>
+        <span class="phrase-clock-sep">/</span>
+        <span id="timeTotal">—:—</span>
+        <span class="phrase-clock-dim">·</span>
+        <span id="timeRemaining">−—:—</span> left
+        <span class="phrase-clock-dim">·</span>
+        <span id="barPosition">bar — / —</span>
       </div>
       <p class="phrase-legend">Shaded blocks = phrase groups at the selected bar length, for whichever deck is currently live. The short bars on each grid line = self-similarity "boundary strength" (taller = more likely a real section change — a heuristic, not verified song structure). Amber line = playhead. Dashed cyan line = the mix trigger point once armed.</p>
     </div>
@@ -539,6 +554,27 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return Math.max(0, Math.min(127, Math.round(n)));
   }
 
+  // Positive modulo (JS's % can return negative for negative inputs).
+  function mod(a, b) {
+    return ((a % b) + b) % b;
+  }
+
+  // Bar length and total loop duration at a deck's CURRENT effective
+  // tempo, not its native one — see the comment on effectiveBpm above.
+  function effectiveBarLen(slot) {
+    return (60 / slot.effectiveBpm) * 4; // assumes 4/4
+  }
+  function effectiveDuration(slot) {
+    return slot.duration * (slot.effectiveBpm / slot.bpm);
+  }
+
+  function formatClock(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
   // one slot = one deck (Deck A or Deck B)
   function makeSlot(name) {
     // Both the synth and its volume-control gain live on nativeCtx, same
@@ -556,6 +592,18 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       eventsPart: null,
       semitoneShift: { value: 0 },
       playing: false,
+      // The deck's native tempo (`bpm`) only describes the record as
+      // authored — once a deck has been beatmatched into another deck's
+      // tempo it keeps playing at that adopted rate indefinitely (even
+      // after it becomes the sole/live deck), so timing math needs the
+      // tempo it's ACTUALLY running at right now.
+      effectiveBpm: 120,
+      // Transport.seconds at which this deck's own song-time-zero (its
+      // first downbeat) lands. 0 for a deck started via Play; a mix's
+      // `nextPhrase` for a deck that entered via Beatmatch Mix. Needed
+      // because Transport never resets — every deck after the very
+      // first one starts partway through Transport's own timeline.
+      transportStartOffset: 0,
     };
   }
 
@@ -630,7 +678,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // deck stays phase-locked while idle — only (re)start it here if
     // stopSlot actually stopped it; calling .start() on an already-started
     // part throws ("Start time must be strictly greater than previous...").
-    if (slot.eventsPart && slot.eventsPart.state !== "started") slot.eventsPart.start(0);
+    if (slot.eventsPart && slot.eventsPart.state !== "started") {
+      slot.eventsPart.start(0);
+      slot.transportStartOffset = 0; // .start(0) re-pins song-time-zero to Transport-zero
+    }
     nativeRampTo(slot.gain.gain, volumeSliderValue / 100, 0.1);
     slot.playing = true;
   }
@@ -662,6 +713,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const overlapLenSel = document.getElementById("overlapLenSel");
   const phraseHeader = document.getElementById("phraseHeader");
   const phraseSuggest = document.getElementById("phraseSuggest");
+  const timeElapsedEl = document.getElementById("timeElapsed");
+  const timeTotalEl = document.getElementById("timeTotal");
+  const timeRemainingEl = document.getElementById("timeRemaining");
+  const barPositionEl = document.getElementById("barPosition");
   const phraseTrack = document.getElementById("phraseTrack");
   const playheadEl = document.getElementById("playhead");
   const triggerEl = document.getElementById("triggerMarker");
@@ -795,6 +850,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slot.key = entry.key;
     slot.binId = entry.id;
     slot.semitoneShift.value = 0;
+    slot.effectiveBpm = entry.bpm;
+    slot.transportStartOffset = 0;
     semSlider.value = 0;
     semLabel.textContent = "0 st";
 
@@ -971,16 +1028,26 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const { events, programs } = collectNotes(incoming.midi);
     programs.forEach((program, channel) => incoming.synth.programChange(channel, program));
 
-    const barLen = anchor.barsData.barLen;
+    // Use the anchor's CURRENT effective tempo, not its native one — if
+    // the anchor itself got beatmatched into some earlier deck's tempo,
+    // that's the rate it's actually playing at right now.
+    const barLen = effectiveBarLen(anchor);
     const L = parseInt(phraseLenSel.value, 10);
     const overlapBars = parseInt(overlapLenSel.value, 10);
     const phraseLenSec = barLen * L;
     const overlapSec = barLen * overlapBars;
 
+    // Phrase boundaries are defined in the anchor's OWN timeline (its
+    // song-time-zero, not Transport-zero — Transport never resets, so
+    // every deck after the first one starts partway through it). Find
+    // the next boundary relative to the anchor's own elapsed time, then
+    // convert back to an absolute Transport time to schedule against.
     const now = Tone.Transport.seconds;
-    const nextPhrase = Math.ceil((now + 0.05) / phraseLenSec) * phraseLenSec;
+    const elapsedInAnchor = now - anchor.transportStartOffset;
+    const nextPhraseElapsed = Math.ceil((elapsedInAnchor + 0.05) / phraseLenSec) * phraseLenSec;
+    const nextPhrase = anchor.transportStartOffset + nextPhraseElapsed;
 
-    const scale = incoming.bpm / anchor.bpm;
+    const scale = incoming.bpm / anchor.effectiveBpm;
     if (incoming.eventsPart) incoming.eventsPart.dispose();
     const scaledDuration = incoming.duration * scale;
 
@@ -1016,6 +1083,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     }, nextPhrase);
 
     incoming.playing = true;
+    incoming.effectiveBpm = anchor.effectiveBpm;
+    incoming.transportStartOffset = nextPhrase;
     mixState.phase = "armed";
     mixState.anchor = anchor;
     mixState.incoming = incoming;
@@ -1026,8 +1095,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     updateLiveFocus();
     renderBinList();
 
-    const barNum = Math.round(nextPhrase / barLen) + 1;
-    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.bpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter on its own downbeat at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
+    const barNum = Math.round(nextPhraseElapsed / barLen) + 1;
+    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter on its own downbeat at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
 
     Tone.Transport.scheduleOnce(() => {
       try {
@@ -1079,11 +1148,24 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (!slotA || !slotB) { requestAnimationFrame(frame); return; }
     const slot = focusedSlot;
     if (slot && slot.duration > 0) {
-      const t = Tone.Transport.seconds % slot.duration;
-      playheadEl.style.left = (t / slot.duration * 100) + "%";
+      const effDur = effectiveDuration(slot);
+      const elapsed = mod(Tone.Transport.seconds - slot.transportStartOffset, effDur);
+      playheadEl.style.left = (elapsed / effDur * 100) + "%";
       playheadEl.hidden = false;
+
+      const effBarLen = effectiveBarLen(slot);
+      const totalBars = Math.max(1, Math.round(effDur / effBarLen));
+      const curBar = Math.min(totalBars, Math.floor(elapsed / effBarLen) + 1);
+      timeElapsedEl.textContent = formatClock(elapsed);
+      timeTotalEl.textContent = formatClock(effDur);
+      timeRemainingEl.textContent = "−" + formatClock(effDur - elapsed);
+      barPositionEl.textContent = `bar ${curBar} / ${totalBars}`;
     } else {
       playheadEl.hidden = true;
+      timeElapsedEl.textContent = "—:—";
+      timeTotalEl.textContent = "—:—";
+      timeRemainingEl.textContent = "−—:—";
+      barPositionEl.textContent = "bar — / —";
     }
 
     meterA.style.width = Math.min(100, slotA.gain.gain.value * 100) + "%";
@@ -1095,10 +1177,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       if (remaining <= 0) {
         mixState.phase = "crossfading";
       } else {
-        const barNum = Math.round(mixState.nextPhrase / anchor.barsData.barLen) + 1;
+        const anchorBarLen = effectiveBarLen(anchor);
+        const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
+        const barNum = Math.round(nextPhraseElapsed / anchorBarLen) + 1;
         mixStateEl.textContent = `Armed — waiting for the next phrase boundary (bar ${barNum} of Deck ${anchor.name}) in ${remaining.toFixed(1)}s.`;
         if (anchor.duration > 0) {
-          triggerEl.style.left = ((mixState.nextPhrase % anchor.duration) / anchor.duration * 100) + "%";
+          const effDur = effectiveDuration(anchor);
+          triggerEl.style.left = (mod(nextPhraseElapsed, effDur) / effDur * 100) + "%";
         }
       }
     } else if (mixState.phase === "crossfading") {
@@ -1107,8 +1192,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       const pct = Math.min(100, Math.round(elapsed / mixState.overlapSec * 100));
       mixStateEl.textContent = `Crossfading… ${pct}% — Deck ${incoming.name} fading in, Deck ${anchor.name} fading out.`;
       if (anchor.duration > 0) {
-        const leftPct = (mixState.nextPhrase % anchor.duration) / anchor.duration * 100;
-        const widthPct = Math.min(100 - leftPct, (mixState.overlapSec / anchor.duration) * 100);
+        const effDur = effectiveDuration(anchor);
+        const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
+        const leftPct = mod(nextPhraseElapsed, effDur) / effDur * 100;
+        const widthPct = Math.min(100 - leftPct, (mixState.overlapSec / effDur) * 100);
         overlapEl.style.left = leftPct + "%";
         overlapEl.style.width = widthPct + "%";
         overlapEl.hidden = false;
