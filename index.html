@@ -321,7 +321,7 @@ button.stopall { background: transparent; }
       <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
       <button class="stopall" id="stopAll">Stop All</button>
     </div>
-    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Assumes 4/4 time and that a record's own MIDI start is its downbeat. Phrase detection is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth, GeneralUser GS bank) with a touch of reverb, so drop in a different .sf2 to change the whole instrument palette.</p>
+    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Assumes 4/4 time and that a record's own MIDI start is its downbeat. Phrase detection is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth, GeneralUser GS bank), so drop in a different .sf2 to change the whole instrument palette.</p>
     <div class="log" id="log"></div>
   </div>
 </div>
@@ -341,13 +341,37 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  // Create the native AudioContext ourselves and hand it to Tone, rather
-  // than relying on Tone.context.rawContext: that wrapper satisfies
-  // duck-typed calls like createGain() fine, but AudioWorkletNode's
-  // constructor does a strict internal BaseAudioContext check that it
-  // fails ("parameter 1 is not of type 'BaseAudioContext'").
+  // The synth engine runs on its OWN plain native AudioContext, kept
+  // entirely separate from Tone's. Two reasons, both hard requirements:
+  // (1) a real AudioWorkletNode constructor does a strict internal
+  // BaseAudioContext check that Tone.context.rawContext fails ("parameter
+  // 1 is not of type 'BaseAudioContext'"), because Tone wraps its context
+  // in the standardized-audio-context shim internally; (2) handing that
+  // same native context to Tone via Tone.setContext() "fixes" (1) but
+  // silently breaks Tone.Transport's scheduling instead — every Tone.Part
+  // callback simply stops firing, with no error (confirmed by testing: a
+  // bare Tone.Loop never ticked once Tone owned a context it didn't wrap
+  // itself). Tone.js's own GitHub issues confirm native nodes/contexts
+  // and its standardized-audio-context layer don't mix reliably.
+  //
+  // So: Tone.Transport/Tone.Part keep driving *timing* on Tone's own
+  // untouched context (that part works great), and every "time" value a
+  // Tone.Part callback hands us gets converted to this context's own
+  // clock before reaching the synth or a native gain node, via
+  // toNativeTime(). Both contexts tick at the same real-time rate once
+  // running, just from different zero-points, so a single offset
+  // (refreshed in ensureAudio) stays accurate.
   const nativeCtx = new (window.AudioContext || window.webkitAudioContext)();
-  Tone.setContext(nativeCtx);
+  let clockOffset = 0;
+  function toNativeTime(toneTime) {
+    return toneTime - clockOffset;
+  }
+  function nativeRampTo(gainParam, target, duration) {
+    const now = nativeCtx.currentTime;
+    gainParam.cancelScheduledValues(now);
+    gainParam.setValueAtTime(gainParam.value, now);
+    gainParam.linearRampToValueAtTime(target, now + duration);
+  }
 
   // @tonejs/midi sometimes throws a plain string instead of an Error (e.g.
   // on a malformed time-signature event), so err.message alone can come
@@ -517,17 +541,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   // one slot = one deck (Deck A or Deck B)
   function makeSlot(name) {
-    const gain = new Tone.Gain(0).toDestination();
-
-    // WorkletSynthesizer isn't itself a native AudioNode (it wraps one
-    // internally) but its own .connect() accepts a plain native
-    // AudioNode — bridge through a small native bus into this deck's
-    // Tone.Gain, the same gain the crossfade automation ramps, via
-    // Tone.connect.
+    // Both the synth and its volume-control gain live on nativeCtx, same
+    // as everything else audio-producing — WorkletSynthesizer.connect()
+    // takes a plain native AudioNode directly, no bridging needed.
+    const gain = nativeCtx.createGain();
+    gain.gain.value = 0;
     const synth = new WorkletSynthesizer(nativeCtx);
-    const synthBus = nativeCtx.createGain();
-    synth.connect(synthBus);
-    Tone.connect(synthBus, gain);
+    synth.connect(gain);
+    gain.connect(masterCompressor);
 
     return {
       name, gain, synth,
@@ -538,12 +559,18 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     };
   }
 
-  // a little reverb send makes the sampled instruments sit together as one
-  // room instead of each note sounding dry and isolated
-  const reverb = new Tone.Reverb({ decay: 2.6, preDelay: 0.02, wet: 0.28 });
-  const master = new Tone.Limiter(-3).toDestination();
-  reverb.connect(master);
-  reverb.generate().catch((err) => log(`Reverb failed to generate, continuing dry: ${errText(err)}`));
+  // A cheap limiter so both decks playing together near full volume
+  // doesn't clip. (No reverb send here, unlike the previous version —
+  // Tone.Reverb lives on Tone's own context and can't take native input
+  // from nativeCtx; a native ConvolverNode-based reverb could replace
+  // this later if the dry sound needs it.)
+  const masterCompressor = nativeCtx.createDynamicsCompressor();
+  masterCompressor.threshold.value = -6;
+  masterCompressor.knee.value = 0;
+  masterCompressor.ratio.value = 20;
+  masterCompressor.attack.value = 0.001;
+  masterCompressor.release.value = 0.1;
+  masterCompressor.connect(nativeCtx.destination);
 
   // Constructing a WorkletSynthesizer needs the processor module already
   // registered on this AudioContext, and loading a soundfont is async —
@@ -557,8 +584,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     await nativeCtx.audioWorklet.addModule("spessasynth/spessasynth_processor.min.js");
     slotA = makeSlot("A");
     slotB = makeSlot("B");
-    slotA.gain.connect(reverb);
-    slotB.gain.connect(reverb);
 
     const sfBuffer = await (await fetch("soundfonts/GeneralUserGS.sf3")).arrayBuffer();
     await Promise.all([
@@ -576,9 +601,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     programs.forEach((program, channel) => slot.synth.programChange(channel, program));
 
     slot.eventsPart = new Tone.Part((time, ev) => {
+      const nt = toNativeTime(time);
       const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
-      if (ev.type === "on") slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time });
-      else slot.synth.noteOff(ev.channel, note, { time });
+      if (ev.type === "on") slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
+      else slot.synth.noteOff(ev.channel, note, { time: nt });
     }, events.map((ev) => [ev.time, ev])).start(0);
     slot.eventsPart.loop = true;
     slot.eventsPart.loopEnd = slot.duration;
@@ -586,13 +612,16 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   async function ensureAudio() {
     if (Tone.context.state !== "running") await Tone.start();
+    if (nativeCtx.state !== "running") await nativeCtx.resume();
     if (Tone.Transport.state !== "started") Tone.Transport.start();
+    // Keep the offset between the two contexts' clocks fresh — see the
+    // comment above nativeCtx's declaration for why there are two.
+    clockOffset = Tone.context.currentTime - nativeCtx.currentTime;
   }
 
   function stopSlot(slot) {
     if (slot.eventsPart) slot.eventsPart.stop(0);
-    slot.gain.gain.cancelScheduledValues(Tone.now());
-    slot.gain.gain.rampTo(0, 0.1);
+    nativeRampTo(slot.gain.gain, 0, 0.1);
     slot.playing = false;
   }
 
@@ -602,8 +631,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // stopSlot actually stopped it; calling .start() on an already-started
     // part throws ("Start time must be strictly greater than previous...").
     if (slot.eventsPart && slot.eventsPart.state !== "started") slot.eventsPart.start(0);
-    slot.gain.gain.cancelScheduledValues(Tone.now());
-    slot.gain.gain.rampTo(volumeSliderValue / 100, 0.1);
+    nativeRampTo(slot.gain.gain, volumeSliderValue / 100, 0.1);
     slot.playing = true;
   }
 
@@ -757,8 +785,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const semSlider = which === "A" ? semA : semB;
     const semLabel = which === "A" ? semAval : semBval;
 
-    slot.gain.gain.cancelScheduledValues(Tone.now());
-    slot.gain.gain.setValueAtTime(0, Tone.now());
+    slot.gain.gain.cancelScheduledValues(nativeCtx.currentTime);
+    slot.gain.gain.setValueAtTime(0, nativeCtx.currentTime);
 
     slot.midi = entry.midi;
     slot.bpm = entry.bpm;
@@ -899,11 +927,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   volA.addEventListener("input", () => {
     volAval.textContent = `${volA.value}%`;
-    if (slotA && slotA.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotA.gain.gain.rampTo(volA.value / 100, 0.08);
+    if (slotA && slotA.playing && (mixState.phase === "idle" || mixState.phase === "done")) nativeRampTo(slotA.gain.gain, volA.value / 100, 0.08);
   });
   volB.addEventListener("input", () => {
     volBval.textContent = `${volB.value}%`;
-    if (slotB && slotB.playing && (mixState.phase === "idle" || mixState.phase === "done")) slotB.gain.gain.rampTo(volB.value / 100, 0.08);
+    if (slotB && slotB.playing && (mixState.phase === "idle" || mixState.phase === "done")) nativeRampTo(slotB.gain.gain, volB.value / 100, 0.08);
   });
   semA.addEventListener("input", () => {
     slotA.semitoneShift.value = parseInt(semA.value, 10);
@@ -957,9 +985,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const scaledDuration = incoming.duration * scale;
 
     incoming.eventsPart = new Tone.Part((time, ev) => {
+      const nt = toNativeTime(time);
       const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + incoming.semitoneShift.value);
-      if (ev.type === "on") incoming.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time });
-      else incoming.synth.noteOff(ev.channel, note, { time });
+      if (ev.type === "on") incoming.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
+      else incoming.synth.noteOff(ev.channel, note, { time: nt });
     }, events.map((ev) => [ev.time * scale, ev]));
     incoming.eventsPart.loop = true;
     incoming.eventsPart.loopEnd = scaledDuration;
@@ -970,21 +999,20 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (!(incomingVolSlider.value > 0)) { incomingVolSlider.value = 80; incomingVolLabel.textContent = "80%"; }
     const targetVolIncoming = incomingVolSlider.value / 100;
 
-    // Gain automation needs the AudioContext-absolute time a scheduled
-    // callback receives, not the Transport-relative "nextPhrase" seconds —
-    // passing Transport time straight into setValueAtTime/linearRamp
-    // schedules it against the wrong clock (usually collapsing to an
-    // instant jump instead of a ramp). Tone.Transport.schedule's callback
-    // gives us the correctly-aligned absolute time to use instead.
+    // Gain automation needs nativeCtx's own clock, not Tone's — the two
+    // decks' gain nodes live on nativeCtx (see the comment by its
+    // declaration), so the Tone.Transport-scheduled callback's "time"
+    // has to go through toNativeTime() before it reaches them.
     Tone.Transport.schedule((time) => {
+      const nt = toNativeTime(time);
       const currentAnchorVal = anchor.gain.gain.value;
-      incoming.gain.gain.cancelScheduledValues(time);
-      incoming.gain.gain.setValueAtTime(0, time);
-      incoming.gain.gain.linearRampToValueAtTime(targetVolIncoming, time + overlapSec);
+      incoming.gain.gain.cancelScheduledValues(nt);
+      incoming.gain.gain.setValueAtTime(0, nt);
+      incoming.gain.gain.linearRampToValueAtTime(targetVolIncoming, nt + overlapSec);
 
-      anchor.gain.gain.cancelScheduledValues(time);
-      anchor.gain.gain.setValueAtTime(currentAnchorVal, time);
-      anchor.gain.gain.linearRampToValueAtTime(0, time + overlapSec);
+      anchor.gain.gain.cancelScheduledValues(nt);
+      anchor.gain.gain.setValueAtTime(currentAnchorVal, nt);
+      anchor.gain.gain.linearRampToValueAtTime(0, nt + overlapSec);
     }, nextPhrase);
 
     incoming.playing = true;
