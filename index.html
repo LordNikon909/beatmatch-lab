@@ -1084,10 +1084,26 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   requestAnimationFrame(frame);
 
   // --- preload the local midis/ folder into the bin on startup ---
-  // Bundled as one base64-encoded midis/bundle.json (rather than per-file
-  // fetches) so the exact same code works both served locally and as a
-  // published Artifact, whose sandbox only serves a fixed list of file
-  // types and doesn't include raw .mid files.
+  // Primary path (local dev server): read the midis/ directory listing
+  // directly — Python's http.server (and most static servers) generate
+  // one for free — so anything dropped into that folder is picked up on
+  // the next page load with no build/regeneration step at all.
+  async function discoverLocalMidis() {
+    const res = await fetch("midis/");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const names = [...doc.querySelectorAll("a[href]")]
+      .map((a) => decodeURIComponent(a.getAttribute("href")))
+      .map((href) => href.replace(/^.*\//, ""))
+      .filter((name) => /\.(mid|midi)$/i.test(name));
+    if (!names.length) throw new Error("no .mid/.midi files found in the listing");
+    return names;
+  }
+
+  // Fallback path (published Artifact, or any static host with no
+  // directory listing): one base64-encoded midis/bundle.json, rebuilt by
+  // hand whenever that deployment's crate needs to change — see README.
   function base64ToArrayBuffer(b64) {
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
@@ -1096,19 +1112,34 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   async function preloadBin() {
-    let bundle;
+    let names, fromListing;
     try {
-      const res = await fetch("midis/bundle.json");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      bundle = await res.json();
+      names = await discoverLocalMidis();
+      fromListing = true;
+      log(`Found ${names.length} MIDI file(s) in midis/ via directory listing.`);
     } catch (err) {
-      log(`No preload bundle found at midis/bundle.json (${errText(err)}) — add records manually instead.`);
-      return;
+      fromListing = false;
     }
-    let loaded = 0, failed = 0;
-    for (const name of Object.keys(bundle)) {
+
+    let bundle = null;
+    if (!fromListing) {
       try {
-        const buf = base64ToArrayBuffer(bundle[name]);
+        const res = await fetch("midis/bundle.json");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        bundle = await res.json();
+        names = Object.keys(bundle);
+      } catch (err) {
+        log(`No directory listing and no preload bundle found (${errText(err)}) — add records manually instead.`);
+        return;
+      }
+    }
+
+    let loaded = 0, failed = 0;
+    for (const name of names) {
+      try {
+        const buf = fromListing
+          ? await (await fetch(`midis/${encodeURIComponent(name)}`)).arrayBuffer()
+          : base64ToArrayBuffer(bundle[name]);
         const midi = new Midi(buf);
         const entry = analyzeEntry(midi, name);
         binEntries.push(entry);

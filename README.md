@@ -14,7 +14,9 @@ Then open `http://localhost:8000/index.html`. (Needs an actual http server — `
 
 ## The record bin
 
-Drop `.mid`/`.midi` files into `midis/`, then regenerate the base64 bundle it preloads from on startup:
+**Running locally** (any server that serves directory listings, like `python3 -m http.server`): just drop `.mid`/`.midi` files into `midis/` and reload the page. On startup it reads the `midis/` directory listing directly and preloads whatever's there — no build step, no regeneration, no restart.
+
+**Published as a Claude Artifact** (or any static host without directory listings): that trick doesn't work, so it falls back to a prebuilt `midis/bundle.json` — one base64-encoded JSON file (Artifacts only serve a fixed list of file extensions, and raw `.mid` isn't one of them, but `.json` is). Regenerate it whenever that deployment's crate should change:
 
 ```bash
 cd midis && python3 -c "
@@ -26,8 +28,6 @@ for f in sorted(os.listdir('.')):
 json.dump(bundle, open('bundle.json', 'w'))
 "
 ```
-
-It's one base64-encoded JSON file rather than per-file fetches so the same code and the same bundle also work when published as a Claude Artifact, whose sandbox only serves a fixed list of file extensions (raw `.mid` isn't one of them, but `.json` is).
 
 You can still add more records manually from the page at any time — the preload just saves re-uploading the same set every session.
 
