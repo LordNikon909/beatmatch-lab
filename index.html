@@ -577,18 +577,83 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   // We drive the synth with discrete noteOn/noteOff messages scheduled
-  // by a Tone.Part — tearing that Part down (a new record loads, Stop
-  // is pressed, a mix finishes) only cancels its FUTURE callbacks. Any
-  // note that already got its noteOn but whose matching noteOff hadn't
-  // fired yet never gets told to stop, so the synth just keeps that
-  // voice held. MIDI's standard "All Notes Off" CC (123) is exactly the
-  // message a real synth expects for this — send it on every channel,
-  // right now, whenever we tear down a deck's Part.
+  // by our own event scheduler (see makeEventScheduler below) — tearing
+  // that down (a new record loads, Stop is pressed, a mix finishes)
+  // only cancels its FUTURE callbacks. Any note that already got its
+  // noteOn but whose matching noteOff hadn't fired yet never gets told
+  // to stop, so the synth just keeps that voice held. MIDI's standard
+  // "All Notes Off" CC (123) is exactly the message a real synth
+  // expects for this — send it on every channel, right now, whenever
+  // we tear down a deck's scheduler.
   function silenceSynth(slot) {
     const now = nativeCtx.currentTime;
     for (let ch = 0; ch < 16; ch++) {
       slot.synth.controllerChange(ch, 123, 0, { time: now });
     }
+  }
+
+  // Our own lightweight replacement for scheduling a deck's bulk
+  // noteOn/noteOff stream — NOT Tone.Part. Measured root cause: Tone.Part
+  // registers every one of its N events as its own entry in Transport's
+  // shared Timeline, and Part.dispose() removes them one at a time via
+  // an indexOf()+splice() each (O(m) per removal, m = Transport's total
+  // scheduled item count right then) — O(n×m) total. On a real ~8000
+  // event track with another deck's events also live, that measured as
+  // 1-3 SECONDS of main-thread blocking on every dispose, which is why
+  // both "loading a different record" and "transitioning" could hang —
+  // disposing the deck's old part is on the critical path of both.
+  //
+  // This instead registers exactly ONE thing with Transport per deck —
+  // a repeating lookahead tick — and walks our own plain, pre-sorted
+  // `events` array with a simple pointer. Starting/stopping/disposing
+  // is O(1) regardless of event count or how long the session has run.
+  // LOOKAHEAD is kept short so a Stop/reload can't leave much
+  // already-queued-ahead audio behind (silenceSynth handles what little
+  // might still be in flight).
+  function makeEventScheduler(slot, events, timeScale, loopEnd) {
+    const LOOKAHEAD = 0.05;
+    let idx = 0;
+    let loopsElapsed = 0;
+    let startAt = null;
+    let repeatId = null;
+
+    function fire(ev, fireAtToneTime) {
+      const nt = toNativeTime(fireAtToneTime);
+      const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
+      if (ev.type === "on") slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
+      else slot.synth.noteOff(ev.channel, note, { time: nt });
+    }
+
+    function tick(time) {
+      if (startAt === null || !events.length || loopEnd <= 0) return;
+      const windowEnd = (time - startAt) + LOOKAHEAD;
+      let guard = 0;
+      while (guard++ <= events.length) {
+        if (idx >= events.length) { idx = 0; loopsElapsed++; }
+        const ev = events[idx];
+        const evElapsed = loopsElapsed * loopEnd + ev.time * timeScale;
+        if (evElapsed > windowEnd) break;
+        fire(ev, startAt + evElapsed);
+        idx++;
+      }
+    }
+
+    return {
+      get state() { return repeatId !== null ? "started" : "stopped"; },
+      start(at) {
+        if (repeatId !== null) return;
+        startAt = at;
+        idx = 0;
+        loopsElapsed = 0;
+        repeatId = Tone.Transport.scheduleRepeat(tick, LOOKAHEAD, at);
+      },
+      stop() {
+        if (repeatId !== null) { Tone.Transport.clear(repeatId); repeatId = null; }
+      },
+      dispose() {
+        this.stop();
+      },
+    };
   }
 
   // one slot = one deck (Deck A or Deck B)
@@ -668,21 +733,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const { events, programs } = collectNotes(slot.midi);
     programs.forEach((program, channel) => slot.synth.programChange(channel, program));
 
-    // Set loop/loopEnd BEFORE start(), not after: measured on a real
-    // 8382-event track, start-then-loop took ~1.7s (looks like Tone
-    // tries to pre-schedule loop repetitions while loopEnd is still at
-    // its default/degenerate value); loop-then-start took ~300ms for
-    // the same data — same fix brought a 16718-event track from ~9.3s
-    // to ~0.6s. Order, not event count, was the real cost here.
-    slot.eventsPart = new Tone.Part((time, ev) => {
-      const nt = toNativeTime(time);
-      const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
-      if (ev.type === "on") slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
-      else slot.synth.noteOff(ev.channel, note, { time: nt });
-    }, events.map((ev) => [ev.time, ev]));
-    slot.eventsPart.loop = true;
-    slot.eventsPart.loopEnd = slot.duration;
-    slot.eventsPart.start(0);
+    slot.eventsPart = makeEventScheduler(slot, events, 1, slot.duration);
+    // Start "now", not Transport-absolute-zero — transportStartOffset
+    // (used throughout for the phrase grid/playhead) tracks whichever
+    // value we actually use here.
+    const startAt = Tone.Transport.seconds + 0.05;
+    slot.eventsPart.start(startAt);
+    slot.transportStartOffset = startAt;
   }
 
   async function ensureAudio() {
@@ -707,8 +764,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // stopSlot actually stopped it; calling .start() on an already-started
     // part throws ("Start time must be strictly greater than previous...").
     if (slot.eventsPart && slot.eventsPart.state !== "started") {
-      slot.eventsPart.start(0);
-      slot.transportStartOffset = 0; // .start(0) re-pins song-time-zero to Transport-zero
+      // Start "now", not Transport-zero — see the comment in buildParts
+      // on why .start(0) gets progressively more expensive the longer
+      // the session has run.
+      const startAt = Tone.Transport.seconds + 0.05;
+      slot.eventsPart.start(startAt);
+      slot.transportStartOffset = startAt;
     }
     nativeRampTo(slot.gain.gain, volumeSliderValue / 100, 0.1);
     slot.playing = true;
@@ -879,7 +940,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slot.binId = entry.id;
     slot.semitoneShift.value = 0;
     slot.effectiveBpm = entry.bpm;
-    slot.transportStartOffset = 0;
+    // transportStartOffset gets set inside buildParts (below), once we
+    // know the real time it's actually starting at.
     semSlider.value = 0;
     semLabel.textContent = "0 st";
 
@@ -1076,17 +1138,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const nextPhrase = anchor.transportStartOffset + nextPhraseElapsed;
 
     const scale = incoming.bpm / anchor.effectiveBpm;
-    if (incoming.eventsPart) { incoming.eventsPart.dispose(); silenceSynth(incoming); }
+    if (incoming.eventsPart) incoming.eventsPart.dispose();
+    silenceSynth(incoming);
     const scaledDuration = incoming.duration * scale;
 
-    incoming.eventsPart = new Tone.Part((time, ev) => {
-      const nt = toNativeTime(time);
-      const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + incoming.semitoneShift.value);
-      if (ev.type === "on") incoming.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
-      else incoming.synth.noteOff(ev.channel, note, { time: nt });
-    }, events.map((ev) => [ev.time * scale, ev]));
-    incoming.eventsPart.loop = true;
-    incoming.eventsPart.loopEnd = scaledDuration;
+    incoming.eventsPart = makeEventScheduler(incoming, events, scale, scaledDuration);
     incoming.eventsPart.start(nextPhrase);
 
     const incomingVolSlider = incoming === slotA ? volA : volB;
