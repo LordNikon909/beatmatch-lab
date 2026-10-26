@@ -614,7 +614,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const LOOKAHEAD = 0.05;
     let idx = 0;
     let loopsElapsed = 0;
-    let startAt = null;
+    let startAtContext = null;
     let repeatId = null;
 
     function fire(ev, fireAtToneTime) {
@@ -625,15 +625,29 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     }
 
     function tick(time) {
-      if (startAt === null || !events.length || loopEnd <= 0) return;
-      const windowEnd = (time - startAt) + LOOKAHEAD;
+      if (!events.length || loopEnd <= 0) return;
+      // Self-calibrate from this scheduler's own first real firing,
+      // measured in the SAME clock Tone hands us for `time` (its raw
+      // AudioContext currentTime) -- rather than trying to convert the
+      // Transport-relative start point we were given into that clock
+      // ourselves. That conversion is only valid once Transport has
+      // been running continuously since before this scheduler started;
+      // for the very first track loaded each session (whose scheduler
+      // starts silently, before Transport has ever started), it isn't,
+      // and comparing `time` against a wrongly-converted reference
+      // produced a huge bogus catch-up window on the very first tick —
+      // a burst of already-"overdue" notes fired all at once. Treating
+      // this tick's own `time` as elapsed-zero sidesteps the conversion
+      // entirely and is correct the moment ticks are actually running.
+      if (startAtContext === null) startAtContext = time;
+      const windowEnd = (time - startAtContext) + LOOKAHEAD;
       let guard = 0;
       while (guard++ <= events.length) {
         if (idx >= events.length) { idx = 0; loopsElapsed++; }
         const ev = events[idx];
         const evElapsed = loopsElapsed * loopEnd + ev.time * timeScale;
         if (evElapsed > windowEnd) break;
-        fire(ev, startAt + evElapsed);
+        fire(ev, startAtContext + evElapsed);
         idx++;
       }
     }
@@ -642,9 +656,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       get state() { return repeatId !== null ? "started" : "stopped"; },
       start(at) {
         if (repeatId !== null) return;
-        startAt = at;
         idx = 0;
         loopsElapsed = 0;
+        startAtContext = null; // re-calibrated from this start's own first tick, see tick() above
         repeatId = Tone.Transport.scheduleRepeat(tick, LOOKAHEAD, at);
       },
       stop() {
@@ -1231,6 +1245,16 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   function frame() {
     if (!slotA || !slotB) { requestAnimationFrame(frame); return; }
+    // Two independent AudioContexts don't necessarily run at exactly the
+    // same real rate — measured clockOffset drifting by several hundred
+    // ms over a few minutes when it was only refreshed once per
+    // ensureAudio() call (on Play / on Beatmatch Mix), which showed up
+    // as notes landing audibly later and later the longer a deck played
+    // solo. Re-reading it every frame keeps it tracking continuously
+    // instead of accumulating error between those calls.
+    if (Tone.context.state === "running" && nativeCtx.state === "running") {
+      clockOffset = Tone.context.currentTime - nativeCtx.currentTime;
+    }
     const slot = focusedSlot;
     if (slot && slot.duration > 0) {
       const effDur = effectiveDuration(slot);
