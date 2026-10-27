@@ -71,6 +71,9 @@ h1 { font-family: var(--display); font-size: clamp(22px, 4vw, 30px); margin: 0; 
 .deck[data-slot="b"] .deck-title { color: var(--accent-b); }
 .bpm-readout { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--fg-dim); }
 .key-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); }
+.marker-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); min-height: 1.2em; }
+.marker-readout.warn { color: var(--warn); }
+.bin-marker-warn { color: var(--warn); }
 .live-badge {
   font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
   padding: 2px 6px; border-radius: 4px; background: var(--ok); color: #06241a;
@@ -151,17 +154,11 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .phrase-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .phrase-suggest { font-size: 12px; color: var(--fg-dim); font-family: var(--mono); }
 .phrase-track {
-  position: relative; height: 76px;
+  position: relative; height: 180px;
   border: 1px solid var(--line); border-radius: 10px;
   background: var(--panel-raised); overflow: hidden;
 }
-.phrase-block { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--line); }
-.phrase-block.alt { background: rgba(255,255,255,0.04); }
-.phrase-tick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--line); }
-.phrase-score-bar { position: absolute; top: 0; width: 5px; left: -2.5px; background: var(--accent-a); border-radius: 0 0 3px 3px; opacity: 0.85; }
-.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); z-index: 3; }
-.trigger-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent-b); z-index: 2; }
-.overlap-window { position: absolute; top: 0; bottom: 0; background: rgba(79,214,255,0.16); z-index: 1; }
+#phraseCanvas { display: block; width: 100%; height: 100%; }
 .phrase-clock {
   font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
   color: var(--fg); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;
@@ -232,6 +229,7 @@ button.stopall { background: transparent; }
       </div>
       <div class="track-name empty" id="nameA">No record loaded</div>
       <div class="key-readout" id="keyA">Key: —</div>
+      <div class="marker-readout" id="markerA"></div>
       <div class="deck-buttons">
         <button class="primary" data-slot="a" id="playA" disabled>Play</button>
         <button id="stopA" disabled>Stop</button>
@@ -258,6 +256,7 @@ button.stopall { background: transparent; }
       </div>
       <div class="track-name empty" id="nameB">No record loaded</div>
       <div class="key-readout" id="keyB">Key: —</div>
+      <div class="marker-readout" id="markerB"></div>
       <div class="deck-buttons">
         <button class="primary" data-slot="b" id="playB" disabled>Play</button>
         <button id="stopB" disabled>Stop</button>
@@ -282,9 +281,7 @@ button.stopall { background: transparent; }
         <span class="phrase-suggest" id="phraseSuggest">No deck is live yet.</span>
       </div>
       <div class="phrase-track" id="phraseTrack">
-        <div class="playhead" id="playhead" hidden></div>
-        <div class="trigger-marker" id="triggerMarker" hidden></div>
-        <div class="overlap-window" id="overlapWindow" hidden></div>
+        <canvas id="phraseCanvas"></canvas>
       </div>
       <div class="phrase-clock" id="phraseClock">
         <span id="timeElapsed">—:—</span>
@@ -295,19 +292,10 @@ button.stopall { background: transparent; }
         <span class="phrase-clock-dim">·</span>
         <span id="barPosition">bar — / —</span>
       </div>
-      <p class="phrase-legend">Shaded blocks = phrase groups at the selected bar length, for whichever deck is currently live. The short bars on each grid line = self-similarity "boundary strength" (taller = more likely a real section change — a heuristic, not verified song structure). Amber line = playhead. Dashed cyan line = the mix trigger point once armed.</p>
+      <p class="phrase-legend">Notes from whichever deck is currently live, colored by channel (percussion in gray). Amber flags = this track's own markers, baked in via the MIDI Marker Tool — these are the only valid mix points. Amber line = playhead. Dashed cyan line = the mix trigger point once armed.</p>
     </div>
 
     <div class="console-controls">
-      <div class="row">
-        <label for="phraseLenSel">Phrase length</label>
-        <select id="phraseLenSel">
-          <option value="2">2 bars</option>
-          <option value="4" selected>4 bars</option>
-          <option value="8">8 bars</option>
-          <option value="16">16 bars</option>
-        </select>
-      </div>
       <div class="row">
         <label for="overlapLenSel">Overlap</label>
         <select id="overlapLenSel">
@@ -337,7 +325,7 @@ button.stopall { background: transparent; }
       <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
       <button class="stopall" id="stopAll">Stop All</button>
     </div>
-    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Assumes 4/4 time and that a record's own MIDI start is its downbeat. Phrase detection is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth, GeneralUser GS bank), so drop in a different .sf2 to change the whole instrument palette.</p>
+    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Mix points come from the anchor's own MIDI Marker meta-events (place them with the companion MIDI Marker Tool) — a record with none can't be an anchor, though it can still mix in as the incoming deck, entering at its own MIDI start. Assumes 4/4 time. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth, GeneralUser GS bank), so drop in a different .sf2 to change the whole instrument palette.</p>
     <div class="log" id="log"></div>
   </div>
 </div>
@@ -399,11 +387,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // `melodic` stays a flat array (for phrase/key analysis, which only
   // cares about pitched content). `events` is the full note on/off
   // stream — including percussion on its own GM channel — used to drive
-  // the real synth. `programs` maps each melodic channel to the GM
-  // program its track declared, for a one-time programChange per deck.
+  // the real synth. `spans` is one entry per note (time+duration+pitch+
+  // channel, undecomposed into on/off) for drawing the piano roll.
+  // `programs` maps each melodic channel to the GM program its track
+  // declared, for a one-time programChange per deck.
   function collectNotes(midi) {
     const melodic = [];
     const events = [];
+    const spans = [];
     const programs = new Map();
     midi.tracks.forEach((track) => {
       const isPerc = !!(track.instrument && track.instrument.percussion) || track.channel === 9;
@@ -416,10 +407,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         if (!isPerc) melodic.push({ time: n.time, duration: n.duration, velocity: n.velocity, midi: n.midi });
         events.push({ type: "on", time: n.time, channel, midi: n.midi, velocity: n.velocity });
         events.push({ type: "off", time: n.time + n.duration, channel, midi: n.midi });
+        spans.push({ time: n.time, duration: n.duration, midi: n.midi, channel, velocity: n.velocity });
       });
     });
     events.sort((a, b) => a.time - b.time);
-    return { melodic, events, programs };
+    spans.sort((a, b) => a.time - b.time);
+    return { melodic, events, spans, programs };
   }
 
   // --- phrase analysis (heuristic self-similarity over bar-bucketed note content) ---
@@ -434,51 +427,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       bars[idx].hist[((n.midi % 12) + 12) % 12]++;
     });
     return { barLen, totalBars, bars };
-  }
-
-  function cosineDist(a, b) {
-    let dot = 0, na = 0, nb = 0;
-    for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-    if (na === 0 || nb === 0) return null;
-    return 1 - dot / (Math.sqrt(na) * Math.sqrt(nb));
-  }
-
-  function phraseBoundaries(barsData, phraseLen) {
-    const { bars, totalBars, barLen } = barsData;
-    const out = [];
-    const sum = (arr) => arr.reduce((acc, b) => {
-      acc.count += b.count;
-      for (let i = 0; i < 12; i++) acc.hist[i] += b.hist[i];
-      return acc;
-    }, { count: 0, hist: new Array(12).fill(0) });
-    for (let k = phraseLen; k < totalBars; k += phraseLen) {
-      const prevBars = bars.slice(Math.max(0, k - phraseLen), k);
-      const nextBars = bars.slice(k, Math.min(totalBars, k + phraseLen));
-      if (!prevBars.length || !nextBars.length) continue;
-      const p = sum(prevBars), n = sum(nextBars);
-      const densP = p.count / prevBars.length, densN = n.count / nextBars.length;
-      const densDelta = Math.abs(densP - densN) / (densP + densN + 1e-6);
-      const pitchDist = cosineDist(p.hist, n.hist);
-      const score = pitchDist === null ? densDelta : (0.7 * pitchDist + 0.3 * densDelta);
-      out.push({ bar: k, time: k * barLen, score });
-    }
-    return out;
-  }
-
-  function suggestPhraseLength(barsData) {
-    const candidates = [4, 8, 16];
-    let best = null;
-    candidates.forEach((L) => {
-      if (barsData.totalBars < 2 * L) return;
-      const b = phraseBoundaries(barsData, L);
-      if (!b.length) return;
-      const scores = b.map((x) => x.score).sort((a, c) => a - c);
-      const max = scores[scores.length - 1];
-      const median = scores[Math.floor(scores.length / 2)];
-      const contrast = max - median;
-      if (!best || contrast > best.contrast) best = { L, contrast, max };
-    });
-    return best ? best.L : 4;
   }
 
   // --- key detection (Krumhansl-Schmuckler: correlate a duration-weighted
@@ -538,6 +486,18 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   // --- the record bin ---
   const binEntries = [];
+  // Markers placed by the MIDI Marker Tool (or any MIDI editor) — real
+  // MIDI Marker meta-events, baked into the file itself rather than
+  // tracked by this app, so the data travels with the record and is
+  // "set in stone" before the app ever opens it. These replace the old
+  // bar-count phrase-length guess as the set of valid mix points.
+  function extractMarkers(midi) {
+    return (midi.header.meta || [])
+      .filter((m) => m.type === "marker")
+      .map((m) => ({ time: midi.header.ticksToSeconds(m.ticks), label: m.text || "" }))
+      .sort((a, b) => a.time - b.time);
+  }
+
   function analyzeEntry(midi, name) {
     let bpm = (midi.header.tempos && midi.header.tempos[0] && midi.header.tempos[0].bpm) || 120;
     let duration = midi.duration;
@@ -548,7 +508,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const info = { midi, bpm, duration };
     const barsData = analyzeBars(info);
     const key = detectKey(info);
-    return { id: crypto.randomUUID(), name, midi, bpm, duration, barsData, key };
+    const markers = extractMarkers(midi);
+    return { id: crypto.randomUUID(), name, midi, bpm, duration, barsData, key, markers };
   }
 
   function clampNote(n) {
@@ -575,6 +536,24 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // total time as 4:18 when it was actually playing out over 4:50 —
     // the inverse of physically correct.
     return slot.duration * (slot.bpm / slot.effectiveBpm);
+  }
+
+  // Finds this deck's next marker at or after a given point in its own
+  // elapsed timeline, returning the marker plus how far away it is in
+  // TRANSPORT-elapsed seconds (i.e. already scaled to the deck's
+  // current effective tempo, same ratio as effectiveDuration above). If
+  // elapsedInSlot is already past the last marker, wraps to the first
+  // marker on the deck's next pass through its own loop — markers are
+  // the valid mix points now, so there should always be a "next" one as
+  // long as the deck has any at all.
+  function nextMarkerElapsed(slot, elapsedInSlot) {
+    if (!slot.markers || !slot.markers.length) return null;
+    const scale = slot.bpm / slot.effectiveBpm;
+    for (const m of slot.markers) {
+      const elapsed = m.time * scale;
+      if (elapsed > elapsedInSlot + 0.05) return { time: elapsed, marker: m };
+    }
+    return { time: slot.markers[0].time * scale + effectiveDuration(slot), marker: slot.markers[0] };
   }
 
   function formatClock(seconds) {
@@ -695,6 +674,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       eventsPart: null,
       semitoneShift: { value: 0 },
       playing: false,
+      // Real MIDI Marker meta-events baked into the file (see
+      // extractMarkers) — the valid mix points for this deck when it's
+      // the anchor. `spans`/pitchMin/pitchMax are the note data and
+      // pitch range for drawing the piano roll; both are populated in
+      // buildParts, once per load, alongside the playback event stream.
+      markers: [],
+      spans: [],
+      pitchMin: 48,
+      pitchMax: 72,
       // The deck's native tempo (`bpm`) only describes the record as
       // authored — once a deck has been beatmatched into another deck's
       // tempo it keeps playing at that adopted rate indefinitely (even
@@ -752,8 +740,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       silenceSynth(slot);
     }
     if (!slot.midi) return;
-    const { events, programs } = collectNotes(slot.midi);
+    const { events, spans, programs } = collectNotes(slot.midi);
     programs.forEach((program, channel) => slot.synth.programChange(channel, program));
+
+    slot.spans = spans;
+    let minP = 127, maxP = 0;
+    spans.forEach((s) => { minP = Math.min(minP, s.midi); maxP = Math.max(maxP, s.midi); });
+    if (minP > maxP) { minP = 48; maxP = 72; }
+    slot.pitchMin = Math.max(0, minP - 2);
+    slot.pitchMax = Math.min(127, maxP + 2);
 
     slot.eventsPart = makeEventScheduler(slot, events, 1, slot.duration);
     // Start "now", not Transport-absolute-zero — transportStartOffset
@@ -806,6 +801,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const bpmB = document.getElementById("bpmB");
   const keyA = document.getElementById("keyA");
   const keyB = document.getElementById("keyB");
+  const markerA = document.getElementById("markerA");
+  const markerB = document.getElementById("markerB");
   const liveBadgeA = document.getElementById("liveBadgeA");
   const liveBadgeB = document.getElementById("liveBadgeB");
   const playA = document.getElementById("playA");
@@ -820,7 +817,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const semAval = document.getElementById("semAval");
   const semB = document.getElementById("semB");
   const semBval = document.getElementById("semBval");
-  const phraseLenSel = document.getElementById("phraseLenSel");
   const overlapLenSel = document.getElementById("overlapLenSel");
   const phraseHeader = document.getElementById("phraseHeader");
   const phraseSuggest = document.getElementById("phraseSuggest");
@@ -828,10 +824,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const timeTotalEl = document.getElementById("timeTotal");
   const timeRemainingEl = document.getElementById("timeRemaining");
   const barPositionEl = document.getElementById("barPosition");
-  const phraseTrack = document.getElementById("phraseTrack");
-  const playheadEl = document.getElementById("playhead");
-  const triggerEl = document.getElementById("triggerMarker");
-  const overlapEl = document.getElementById("overlapWindow");
+  const phraseCanvas = document.getElementById("phraseCanvas");
+  const phraseCtx = phraseCanvas.getContext("2d");
   const meterA = document.getElementById("meterA");
   const meterB = document.getElementById("meterB");
   const harmonyBadge = document.getElementById("harmonyBadge");
@@ -852,7 +846,20 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   function refreshMixInAvailability() {
     if (mixState.phase !== "idle" && mixState.phase !== "done") return;
     const roles = getAnchorIncoming();
-    mixIn.disabled = !(roles && roles.incoming.midi);
+    if (!roles || !roles.incoming.midi) {
+      mixIn.disabled = true;
+      return;
+    }
+    // Mix points come entirely from the anchor's own real MIDI markers
+    // now — with none, there's nowhere valid to trigger the mix, so
+    // require them rather than silently falling back to a guess.
+    if (!roles.anchor.markers || roles.anchor.markers.length === 0) {
+      mixIn.disabled = true;
+      mixStateEl.textContent = `Deck ${roles.anchor.name} has no markers — mark it in the MIDI Marker Tool before Beatmatch Mix can find a mix point.`;
+    } else {
+      mixIn.disabled = false;
+      mixStateEl.textContent = `Ready — Deck ${roles.incoming.name} will mix into Deck ${roles.anchor.name} at its next marker.`;
+    }
   }
 
   function liveSlotForDisplay() {
@@ -871,17 +878,38 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const target = liveSlotForDisplay();
     if (target === focusedSlot) return;
     focusedSlot = target;
-    if (target && target.barsData) {
-      phraseHeader.textContent = `Deck ${target.name} Phrase Grid (live)`;
-      phraseLenSel.value = String(suggestPhraseLength(target.barsData));
-    } else {
-      phraseHeader.textContent = "Phrase Grid";
-    }
-    renderPhraseGrid();
+    phraseHeader.textContent = (target && target.barsData) ? `Deck ${target.name} Phrase Grid (live)` : "Phrase Grid";
   }
 
-  function renderPhraseGrid() {
-    phraseTrack.querySelectorAll(".phrase-block, .phrase-tick").forEach((el) => el.remove());
+  function resizePhraseCanvas() {
+    const rect = phraseCanvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (phraseCanvas.width !== w || phraseCanvas.height !== h) {
+      phraseCanvas.width = w;
+      phraseCanvas.height = h;
+      phraseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+  }
+
+  const PHRASE_CHANNEL_COLORS = ["#4fd6ff", "#ff5b7f", "#ffcf5b", "#35c47a", "#b58cff", "#ff8a5b", "#5bffd0", "#ff5bd6"];
+
+  // Replaces the old shaded-block/boundary-strength heuristic view with
+  // the deck's actual notes (ported from the MIDI Marker Tool's piano
+  // roll) plus its real markers as flags — the same data Beatmatch Mix
+  // now uses to pick a trigger point, so what you see here is exactly
+  // what's driving the mix. Positions are all in native-time fractions
+  // (time/duration), the same scale-invariant space the playhead
+  // percentage below is already computed in, so this works unchanged
+  // whether the deck is at its native tempo or has been retimed by a
+  // previous mix.
+  function drawPhraseCanvas(playheadPct, triggerPct, overlapLeftPct, overlapWidthPct) {
+    resizePhraseCanvas();
+    const w = phraseCanvas.clientWidth, h = phraseCanvas.clientHeight;
+    if (!w || !h) return;
+    phraseCtx.clearRect(0, 0, w, h);
+
     const slot = focusedSlot;
     if (!slot || !slot.midi || !slot.barsData) {
       phraseSuggest.textContent = "No deck is live yet.";
@@ -889,34 +917,75 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     }
     const duration = slot.duration;
     const barLen = slot.barsData.barLen;
-    const L = parseInt(phraseLenSel.value, 10);
-    const phraseLenSec = barLen * L;
-    const boundaries = phraseBoundaries(slot.barsData, L);
 
-    let p = 0;
-    while (p * phraseLenSec < duration) {
-      const left = (p * phraseLenSec / duration) * 100;
-      const width = Math.min(phraseLenSec, duration - p * phraseLenSec) / duration * 100;
-      const block = document.createElement("div");
-      block.className = "phrase-block" + (p % 2 ? " alt" : "");
-      block.style.left = left + "%";
-      block.style.width = width + "%";
-      phraseTrack.insertBefore(block, playheadEl);
-      p++;
+    // Grid lines read the theme's own line color so they stay visible
+    // (not near-invisible or near-black) in both light and dark mode;
+    // the rest of the palette is a fixed accent set, same as the MIDI
+    // Marker Tool, since these need to read as distinct colors more
+    // than they need to match either theme exactly.
+    const lineColor = getComputedStyle(document.documentElement).getPropertyValue("--line").trim() || "#352f3f";
+    phraseCtx.lineWidth = 1;
+    phraseCtx.strokeStyle = lineColor;
+    let bar = 0;
+    while (bar * barLen < duration) {
+      const x = (bar * barLen / duration) * w;
+      phraseCtx.globalAlpha = bar % 4 === 0 ? 0.9 : 0.35;
+      phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
+      bar++;
     }
-    boundaries.forEach((b) => {
-      if (b.time >= duration) return;
-      const tick = document.createElement("div");
-      tick.className = "phrase-tick";
-      tick.style.left = (b.time / duration * 100) + "%";
-      const bar = document.createElement("div");
-      bar.className = "phrase-score-bar";
-      bar.style.height = Math.max(3, b.score * 26) + "px";
-      tick.appendChild(bar);
-      phraseTrack.insertBefore(tick, playheadEl);
+    phraseCtx.globalAlpha = 1;
+
+    const rowH = Math.max(1.5, h / (slot.pitchMax - slot.pitchMin + 1));
+    slot.spans.forEach((s) => {
+      const x = (s.time / duration) * w;
+      const x2 = ((s.time + s.duration) / duration) * w;
+      const noteW = Math.max(1, x2 - x);
+      const y = h - (s.midi - slot.pitchMin + 1) * rowH;
+      phraseCtx.fillStyle = s.channel === 9 ? "#6b6478" : PHRASE_CHANNEL_COLORS[s.channel % PHRASE_CHANNEL_COLORS.length];
+      phraseCtx.globalAlpha = 0.3 + 0.6 * s.velocity;
+      phraseCtx.fillRect(x, y, noteW, Math.max(1, rowH - 1));
     });
-    phraseSuggest.textContent = `${boundaries.length} candidate boundar${boundaries.length === 1 ? "y" : "ies"} at ${L}-bar grouping`;
+    phraseCtx.globalAlpha = 1;
+
+    slot.markers.forEach((m) => {
+      const x = (m.time / duration) * w;
+      phraseCtx.strokeStyle = "#ffcf5b";
+      phraseCtx.lineWidth = 1.5;
+      phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
+      if (m.label) {
+        phraseCtx.font = "10px monospace";
+        const tw = phraseCtx.measureText(m.label).width + 8;
+        phraseCtx.fillStyle = "#121016";
+        phraseCtx.fillRect(x + 1, h - 15, tw, 15);
+        phraseCtx.fillStyle = "#ffcf5b";
+        phraseCtx.fillText(m.label, x + 4, h - 4);
+      }
+    });
+
+    if (overlapLeftPct !== null) {
+      phraseCtx.fillStyle = "rgba(79,214,255,0.16)";
+      phraseCtx.fillRect(overlapLeftPct / 100 * w, 0, overlapWidthPct / 100 * w, h);
+    }
+    if (triggerPct !== null) {
+      const x = triggerPct / 100 * w;
+      phraseCtx.strokeStyle = "#4fd6ff";
+      phraseCtx.lineWidth = 2;
+      phraseCtx.setLineDash([4, 3]);
+      phraseCtx.beginPath(); phraseCtx.moveTo(x, 0); phraseCtx.lineTo(x, h); phraseCtx.stroke();
+      phraseCtx.setLineDash([]);
+    }
+    if (playheadPct !== null) {
+      const x = playheadPct / 100 * w;
+      phraseCtx.strokeStyle = "#ffcf5b";
+      phraseCtx.lineWidth = 2;
+      phraseCtx.beginPath(); phraseCtx.moveTo(x, 0); phraseCtx.lineTo(x, h); phraseCtx.stroke();
+    }
+
+    phraseSuggest.textContent = slot.markers.length
+      ? `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}`
+      : "⚠ no markers on this track";
   }
+  window.addEventListener("resize", () => drawPhraseCanvas(null, null, null, null));
 
   function updateHarmony() {
     if (!slotA.key || !slotB.key) {
@@ -947,6 +1016,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const nameEl = which === "A" ? nameA : nameB;
     const bpmEl = which === "A" ? bpmA : bpmB;
     const keyEl = which === "A" ? keyA : keyB;
+    const markerEl = which === "A" ? markerA : markerB;
     const playBtn = which === "A" ? playA : playB;
     const semSlider = which === "A" ? semA : semB;
     const semLabel = which === "A" ? semAval : semBval;
@@ -959,6 +1029,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slot.duration = entry.duration;
     slot.barsData = entry.barsData;
     slot.key = entry.key;
+    slot.markers = entry.markers || [];
     slot.binId = entry.id;
     slot.semitoneShift.value = 0;
     slot.effectiveBpm = entry.bpm;
@@ -972,6 +1043,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     nameEl.classList.remove("empty");
     bpmEl.textContent = `${slot.bpm.toFixed(1)} bpm`;
     keyEl.textContent = slot.key ? `Key: ${slot.key.name} (${Math.round(slot.key.score * 100)}%)` : "Key: no tonal center found";
+    if (slot.markers.length > 0) {
+      markerEl.textContent = `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}: ${slot.markers.map((m) => m.label || "?").join(", ")}`;
+      markerEl.classList.remove("warn");
+    } else {
+      markerEl.textContent = "⚠ no markers — Beatmatch Mix needs this track marked first";
+      markerEl.classList.add("warn");
+    }
     playBtn.disabled = false;
 
     log(`Loaded "${entry.name}" onto Deck ${which} — ${slot.bpm.toFixed(1)} BPM, ${slot.key ? slot.key.name : "no tonal center"}.`);
@@ -1009,7 +1087,16 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       nameEl.textContent = entry.name;
       const meta = document.createElement("span");
       meta.className = "bin-meta";
-      meta.textContent = `${entry.bpm.toFixed(1)} bpm · ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"} · ${entry.duration.toFixed(1)}s`;
+      meta.textContent = `${entry.bpm.toFixed(1)} bpm · ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"} · ${entry.duration.toFixed(1)}s · `;
+      const markerSpan = document.createElement("span");
+      const markerCount = entry.markers ? entry.markers.length : 0;
+      if (markerCount > 0) {
+        markerSpan.textContent = `${markerCount} marker${markerCount === 1 ? "" : "s"}`;
+      } else {
+        markerSpan.className = "bin-marker-warn";
+        markerSpan.textContent = "⚠ no markers";
+      }
+      meta.appendChild(markerSpan);
       info.appendChild(nameEl);
       info.appendChild(meta);
       if (slotA.binId === entry.id) {
@@ -1110,8 +1197,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slotB.semitoneShift.value = parseInt(semB.value, 10);
     semBval.textContent = `${semB.value} st`;
   });
-  phraseLenSel.addEventListener("change", renderPhraseGrid);
-
   applyTranspose.addEventListener("click", (e) => {
     const shift = parseInt(e.target.dataset.shift, 10);
     const deck = e.target.dataset.targetDeck;
@@ -1131,6 +1216,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (mixIn.disabled || mixState.phase === "armed" || mixState.phase === "crossfading") return;
     const roles = getAnchorIncoming();
     if (!roles || !roles.incoming.midi) return;
+    if (!roles.anchor.markers || !roles.anchor.markers.length) return;
     mixIn.disabled = true;
     const { anchor, incoming } = roles;
 
@@ -1142,21 +1228,22 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
     // Use the anchor's CURRENT effective tempo, not its native one — if
     // the anchor itself got beatmatched into some earlier deck's tempo,
-    // that's the rate it's actually playing at right now.
+    // that's the rate it's actually playing at right now. Overlap length
+    // is still a plain bar count (how LONG the crossfade takes) — only
+    // WHERE it triggers now comes from the anchor's own markers.
     const barLen = effectiveBarLen(anchor);
-    const L = parseInt(phraseLenSel.value, 10);
     const overlapBars = parseInt(overlapLenSel.value, 10);
-    const phraseLenSec = barLen * L;
     const overlapSec = barLen * overlapBars;
 
-    // Phrase boundaries are defined in the anchor's OWN timeline (its
+    // Mix points are defined in the anchor's OWN timeline (its
     // song-time-zero, not Transport-zero — Transport never resets, so
     // every deck after the first one starts partway through it). Find
-    // the next boundary relative to the anchor's own elapsed time, then
+    // the next marker ahead of the anchor's own elapsed position, then
     // convert back to an absolute Transport time to schedule against.
     const now = Tone.Transport.seconds;
     const elapsedInAnchor = now - anchor.transportStartOffset;
-    const nextPhraseElapsed = Math.ceil((elapsedInAnchor + 0.05) / phraseLenSec) * phraseLenSec;
+    const next = nextMarkerElapsed(anchor, elapsedInAnchor);
+    const nextPhraseElapsed = next.time;
     const nextPhrase = anchor.transportStartOffset + nextPhraseElapsed;
 
     const scale = incoming.bpm / anchor.effectiveBpm;
@@ -1196,13 +1283,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     mixState.incoming = incoming;
     mixState.nextPhrase = nextPhrase;
     mixState.overlapSec = overlapSec;
-    triggerEl.hidden = false;
-    overlapEl.hidden = true;
     updateLiveFocus();
     renderBinList();
 
     const barNum = Math.round(nextPhraseElapsed / barLen) + 1;
-    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter on its own downbeat at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
+    const markerLabel = (next.marker && next.marker.label) || "(unlabeled)";
+    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter at Deck ${anchor.name}'s "${markerLabel}" marker (bar ${barNum}, t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
 
     Tone.Transport.scheduleOnce(() => {
       try {
@@ -1210,8 +1296,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         silenceSynth(anchor);
         anchor.playing = false;
         mixState.phase = "done";
-        triggerEl.hidden = true;
-        overlapEl.hidden = true;
         mixStateEl.textContent = `Done — Deck ${anchor.name} faded out and stopped. Deck ${incoming.name} is now live. Load a fresh record into Deck ${anchor.name} to keep the set going.`;
         mixIn.disabled = false;
         updateLiveFocus();
@@ -1228,8 +1312,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       mixState.phase = "idle";
       mixState.anchor = null;
       mixState.incoming = null;
-      triggerEl.hidden = true;
-      overlapEl.hidden = true;
       mixStateEl.textContent = "Something went wrong starting the mix — see the log below. Try again.";
       mixIn.disabled = false;
       refreshMixInAvailability();
@@ -1242,8 +1324,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     mixState.phase = "idle";
     mixState.anchor = null;
     mixState.incoming = null;
-    triggerEl.hidden = true;
-    overlapEl.hidden = true;
     mixStateEl.textContent = "Idle. Press Play on a deck to start the set, load a record into the other deck, then press Beatmatch Mix.";
     updateLiveFocus();
     refreshMixInAvailability();
@@ -1264,11 +1344,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       clockOffset = Tone.context.currentTime - nativeCtx.currentTime;
     }
     const slot = focusedSlot;
+    let playheadPct = null;
     if (slot && slot.duration > 0) {
       const effDur = effectiveDuration(slot);
       const elapsed = mod(Tone.Transport.seconds - slot.transportStartOffset, effDur);
-      playheadEl.style.left = (elapsed / effDur * 100) + "%";
-      playheadEl.hidden = false;
+      playheadPct = elapsed / effDur * 100;
 
       const effBarLen = effectiveBarLen(slot);
       const totalBars = Math.max(1, Math.round(effDur / effBarLen));
@@ -1278,7 +1358,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       timeRemainingEl.textContent = "−" + formatClock(effDur - elapsed);
       barPositionEl.textContent = `bar ${curBar} / ${totalBars}`;
     } else {
-      playheadEl.hidden = true;
       timeElapsedEl.textContent = "—:—";
       timeTotalEl.textContent = "—:—";
       timeRemainingEl.textContent = "−—:—";
@@ -1288,6 +1367,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     meterA.style.width = Math.min(100, slotA.gain.gain.value * 100) + "%";
     meterB.style.width = Math.min(100, slotB.gain.gain.value * 100) + "%";
 
+    let triggerPct = null, overlapLeftPct = null, overlapWidthPct = null;
     if (mixState.phase === "armed") {
       const anchor = mixState.anchor;
       const remaining = mixState.nextPhrase - Tone.Transport.seconds;
@@ -1297,10 +1377,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         const anchorBarLen = effectiveBarLen(anchor);
         const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
         const barNum = Math.round(nextPhraseElapsed / anchorBarLen) + 1;
-        mixStateEl.textContent = `Armed — waiting for the next phrase boundary (bar ${barNum} of Deck ${anchor.name}) in ${remaining.toFixed(1)}s.`;
+        mixStateEl.textContent = `Armed — waiting for Deck ${anchor.name}'s next marker (bar ${barNum}) in ${remaining.toFixed(1)}s.`;
         if (anchor.duration > 0) {
           const effDur = effectiveDuration(anchor);
-          triggerEl.style.left = (mod(nextPhraseElapsed, effDur) / effDur * 100) + "%";
+          triggerPct = mod(nextPhraseElapsed, effDur) / effDur * 100;
         }
       }
     } else if (mixState.phase === "crossfading") {
@@ -1311,13 +1391,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       if (anchor.duration > 0) {
         const effDur = effectiveDuration(anchor);
         const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
-        const leftPct = mod(nextPhraseElapsed, effDur) / effDur * 100;
-        const widthPct = Math.min(100 - leftPct, (mixState.overlapSec / effDur) * 100);
-        overlapEl.style.left = leftPct + "%";
-        overlapEl.style.width = widthPct + "%";
-        overlapEl.hidden = false;
+        overlapLeftPct = mod(nextPhraseElapsed, effDur) / effDur * 100;
+        overlapWidthPct = Math.min(100 - overlapLeftPct, (mixState.overlapSec / effDur) * 100);
       }
     }
+
+    drawPhraseCanvas(playheadPct, triggerPct, overlapLeftPct, overlapWidthPct);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

@@ -1,6 +1,6 @@
 # Beat Match Lab
 
-A browser proof-of-concept exploring an RPG battle-screen mechanic built around DJ beatmatching: load MIDI records into a bin, mix two decks together with automatic phrase-synced crossfades, and see detected BPM/key/phrase-structure visualized live.
+A browser proof-of-concept exploring an RPG battle-screen mechanic built around DJ beatmatching: load MIDI records into a bin, mix two decks together with automatic marker-synced crossfades, and see each record's actual notes and mix points visualized live as a piano roll.
 
 ## Running it
 
@@ -37,9 +37,11 @@ You can still add more records manually from the page at any time — the preloa
 
 ## What it does
 
-- **Record bin** — upload multiple `.midi`/`.mid` files at once; each gets BPM and key detected immediately (Krumhansl-Schmuckler key-finding), plus a phrase-boundary heuristic (self-similarity over bar-bucketed note content).
+- **Record bin** — upload multiple `.midi`/`.mid` files at once; each gets BPM and key detected immediately (Krumhansl-Schmuckler key-finding). Any markers already baked into a file are read too, and each entry shows its marker count — or a warning if it has none.
 - **Two decks (A/B)** — load any bin record onto either deck, play it, transpose it, adjust its volume.
-- **Beatmatch Mix** — whichever deck is currently live is the anchor; press the button to retime the other (staged) deck onto the anchor's tempo, wait for the anchor's next phrase boundary, enter the incoming deck on its own first downbeat, and auto-crossfade over a configurable number of bars. The anchor then fades out and stops, handing "live" status to the deck that just mixed in — load a fresh record into the newly silent deck to keep the set going indefinitely.
+- **Mix points come from real MIDI markers, not a guess.** This app doesn't detect phrase boundaries itself — it reads standard MIDI Marker meta-events baked into the file beforehand by the companion [MIDI Marker Tool](../midi-marker-tool), so mix points are "set in stone" ahead of time rather than re-guessed at runtime, same as a game would want. A record with no markers can still mix **in** as the incoming deck (it enters at its own MIDI start), but can't be the anchor — Beatmatch Mix needs to know where the *live* deck's next valid mix point is.
+- **Beatmatch Mix** — whichever deck is currently live is the anchor; press the button to retime the other (staged) deck onto the anchor's tempo, wait for the anchor's own next marker, enter the incoming deck on its own first downbeat, and auto-crossfade over a configurable number of bars. The anchor then fades out and stops, handing "live" status to the deck that just mixed in — load a fresh (marked) record into the newly silent deck to keep the set going indefinitely.
+- **Piano-roll phrase grid** — the currently-live deck's actual notes, rendered as a full piano roll (colored by channel, percussion in gray), with its markers drawn as amber flags right on the timeline — the same data driving the mix, not a separate abstraction. Playhead, the armed mix trigger point, and the crossfade window all draw on top of it live.
 - **Harmony badge** — compares the two decks' detected keys (same key / relative major-minor / a fifth apart / clashing) and offers a one-click suggested transpose.
 - **Live time/bar readout** — elapsed, remaining, and total time plus bar position (e.g. "bar 14 / 89") for whichever deck is currently live, next to the phrase grid. Tracks each deck's *effective* tempo and its own position on the Transport timeline (not just its native tempo and an assumed zero start), so it stays accurate through any number of chained mixes.
 - **Instrument playback** — each deck runs its own real SoundFont2 synthesizer ([SpessaSynth](https://github.com/spessasus/SpessaSynth), via an AudioWorklet), loaded with `soundfonts/GeneralUserGS.sf3`. Every MIDI channel plays through its own declared GM program, including proper polyphony; percussion plays through the soundfont's own real GM drum kit on channel 9. Drop in a different `.sf2`/`.sf3` file (e.g. an SC-55-style bank, for a more PS1-accurate character) and update the path in `initAudioEngine()` to change the whole instrument palette — no other code changes needed. A native `DynamicsCompressorNode` sits on the master bus as a safety limiter. **Local only** — the hosted Claude Artifact version falls back to plain oscillator synths, since its sandbox can't run an AudioWorklet module fetched from an arbitrary CDN.
@@ -48,5 +50,5 @@ You can still add more records manually from the page at any time — the preloa
 ## Known limitations
 
 - Assumes 4/4 time throughout.
-- Phrase detection is a heuristic (self-similarity on note density + pitch-class histograms), not verified song structure.
+- An anchor deck with no markers can't trigger Beatmatch Mix — mark it with the [MIDI Marker Tool](../midi-marker-tool) first (a double-click launcher/README live there too).
 - Key detection is whole-track and blind to mid-song key changes.
