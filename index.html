@@ -566,7 +566,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return (60 / slot.effectiveBpm) * 4; // assumes 4/4
   }
   function effectiveDuration(slot) {
-    return slot.duration * (slot.effectiveBpm / slot.bpm);
+    // A deck playing FASTER than its native tempo (effectiveBpm > bpm)
+    // gets through its native duration in LESS real/transport time, not
+    // more — same ratio the actual note scheduler uses in mixIn's
+    // `scale` (incoming.bpm / anchor.effectiveBpm, i.e. bpm/effectiveBpm
+    // once this deck's own effectiveBpm is set to match). Measured: the
+    // previous (effectiveBpm/bpm) version showed a beatmatched deck's
+    // total time as 4:18 when it was actually playing out over 4:50 —
+    // the inverse of physically correct.
+    return slot.duration * (slot.bpm / slot.effectiveBpm);
   }
 
   function formatClock(seconds) {
