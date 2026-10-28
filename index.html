@@ -292,10 +292,19 @@ button.stopall { background: transparent; }
         <span class="phrase-clock-dim">·</span>
         <span id="barPosition">bar — / —</span>
       </div>
-      <p class="phrase-legend">Notes from whichever deck is currently live, colored by channel (percussion in gray). Amber flags = this track's own markers, baked in via the MIDI Marker Tool — these are the only valid mix points. Amber line = playhead. Dashed cyan line = the mix trigger point once armed.</p>
+      <p class="phrase-legend">Notes from whichever deck is currently live, colored by channel (percussion in gray). Amber flags = this track's own markers (annotations only). Cyan flag = its grid anchor, if set via the MIDI Marker Tool — re-anchors bar 1 to the track's real first downbeat instead of assuming it's at the file's start. Amber line = playhead. Dashed cyan line = the mix trigger point once armed.</p>
     </div>
 
     <div class="console-controls">
+      <div class="row">
+        <label for="phraseLenSel">Phrase length</label>
+        <select id="phraseLenSel">
+          <option value="2">2 bars</option>
+          <option value="4" selected>4 bars</option>
+          <option value="8">8 bars</option>
+          <option value="16">16 bars</option>
+        </select>
+      </div>
       <div class="row">
         <label for="overlapLenSel">Overlap</label>
         <select id="overlapLenSel">
@@ -325,7 +334,7 @@ button.stopall { background: transparent; }
       <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
       <button class="stopall" id="stopAll">Stop All</button>
     </div>
-    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Mix points come from the anchor's own MIDI Marker meta-events (place them with the companion MIDI Marker Tool) — a record with none can't be an anchor, though it can still mix in as the incoming deck, entering at its own MIDI start. Assumes 4/4 time. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth, GeneralUser GS bank), so drop in a different .sf2 to change the whole instrument palette.</p>
+    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Phrasing is automatic: it triggers at the next multiple of the selected phrase length, counted from the anchor's grid anchor if it has one (set via the companion MIDI Marker Tool), or from the file's own start otherwise. Assumes 4/4 time and that a record's own MIDI start is its downbeat unless a grid anchor says otherwise. Phrase-length auto-suggestion is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth), so drop in a different .sf2 to change the whole instrument palette.</p>
     <div class="log" id="log"></div>
   </div>
 </div>
@@ -429,6 +438,55 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return { barLen, totalBars, bars };
   }
 
+  function cosineDist(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+    if (na === 0 || nb === 0) return null;
+    return 1 - dot / (Math.sqrt(na) * Math.sqrt(nb));
+  }
+
+  function phraseBoundaries(barsData, phraseLen) {
+    const { bars, totalBars, barLen } = barsData;
+    const out = [];
+    const sum = (arr) => arr.reduce((acc, b) => {
+      acc.count += b.count;
+      for (let i = 0; i < 12; i++) acc.hist[i] += b.hist[i];
+      return acc;
+    }, { count: 0, hist: new Array(12).fill(0) });
+    for (let k = phraseLen; k < totalBars; k += phraseLen) {
+      const prevBars = bars.slice(Math.max(0, k - phraseLen), k);
+      const nextBars = bars.slice(k, Math.min(totalBars, k + phraseLen));
+      if (!prevBars.length || !nextBars.length) continue;
+      const p = sum(prevBars), n = sum(nextBars);
+      const densP = p.count / prevBars.length, densN = n.count / nextBars.length;
+      const densDelta = Math.abs(densP - densN) / (densP + densN + 1e-6);
+      const pitchDist = cosineDist(p.hist, n.hist);
+      const score = pitchDist === null ? densDelta : (0.7 * pitchDist + 0.3 * densDelta);
+      out.push({ bar: k, time: k * barLen, score });
+    }
+    return out;
+  }
+
+  // Auto-suggests a sensible phrase length when a deck becomes live —
+  // the one piece of the old self-similarity heuristic kept around;
+  // the boundary-strength visualization it used to drive is superseded
+  // by seeing the deck's actual notes on the piano roll instead.
+  function suggestPhraseLength(barsData) {
+    const candidates = [4, 8, 16];
+    let best = null;
+    candidates.forEach((L) => {
+      if (barsData.totalBars < 2 * L) return;
+      const b = phraseBoundaries(barsData, L);
+      if (!b.length) return;
+      const scores = b.map((x) => x.score).sort((a, c) => a - c);
+      const max = scores[scores.length - 1];
+      const median = scores[Math.floor(scores.length / 2)];
+      const contrast = max - median;
+      if (!best || contrast > best.contrast) best = { L, contrast, max };
+    });
+    return best ? best.L : 4;
+  }
+
   // --- key detection (Krumhansl-Schmuckler: correlate a duration-weighted
   // pitch-class histogram against the 24 major/minor key profiles) ---
   const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
@@ -487,15 +545,26 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // --- the record bin ---
   const binEntries = [];
   // Markers placed by the MIDI Marker Tool (or any MIDI editor) — real
-  // MIDI Marker meta-events, baked into the file itself rather than
-  // tracked by this app, so the data travels with the record and is
-  // "set in stone" before the app ever opens it. These replace the old
-  // bar-count phrase-length guess as the set of valid mix points.
+  // MIDI Marker meta-events, baked into the file itself. Purely
+  // annotations here (shown on the piano roll) — they don't drive
+  // mixing; phrasing is automatic bar-count again, below.
   function extractMarkers(midi) {
     return (midi.header.meta || [])
       .filter((m) => m.type === "marker")
       .map((m) => ({ time: midi.header.ticksToSeconds(m.ticks), label: m.text || "" }))
       .sort((a, b) => a.time - b.time);
+  }
+
+  // The grid anchor is a single special point — "the track's real first
+  // downbeat" — read from a MIDI Cue Point (not a Marker; a different
+  // meta-event type, set via the MIDI Marker Tool's "Set grid anchor").
+  // When present, the automatic bar-count phrasing and the piano roll's
+  // grid both count bar 1 from here instead of assuming it's at the
+  // file's own time zero, the same role a beatgrid marker plays in
+  // Traktor. null when a track has none (falls back to time zero).
+  function extractGridAnchor(midi) {
+    const cue = (midi.header.meta || []).find((m) => m.type === "cuePoint");
+    return cue ? midi.header.ticksToSeconds(cue.ticks) : null;
   }
 
   function analyzeEntry(midi, name) {
@@ -509,7 +578,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const barsData = analyzeBars(info);
     const key = detectKey(info);
     const markers = extractMarkers(midi);
-    return { id: crypto.randomUUID(), name, midi, bpm, duration, barsData, key, markers };
+    const gridAnchor = extractGridAnchor(midi);
+    return { id: crypto.randomUUID(), name, midi, bpm, duration, barsData, key, markers, gridAnchor };
   }
 
   function clampNote(n) {
@@ -538,22 +608,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return slot.duration * (slot.bpm / slot.effectiveBpm);
   }
 
-  // Finds this deck's next marker at or after a given point in its own
-  // elapsed timeline, returning the marker plus how far away it is in
-  // TRANSPORT-elapsed seconds (i.e. already scaled to the deck's
-  // current effective tempo, same ratio as effectiveDuration above). If
-  // elapsedInSlot is already past the last marker, wraps to the first
-  // marker on the deck's next pass through its own loop — markers are
-  // the valid mix points now, so there should always be a "next" one as
-  // long as the deck has any at all.
-  function nextMarkerElapsed(slot, elapsedInSlot) {
-    if (!slot.markers || !slot.markers.length) return null;
-    const scale = slot.bpm / slot.effectiveBpm;
-    for (const m of slot.markers) {
-      const elapsed = m.time * scale;
-      if (elapsed > elapsedInSlot + 0.05) return { time: elapsed, marker: m };
-    }
-    return { time: slot.markers[0].time * scale + effectiveDuration(slot), marker: slot.markers[0] };
+  // Where this deck's grid anchor (its real first downbeat, if set) sits
+  // in TRANSPORT-elapsed seconds — same scaling ratio as
+  // effectiveDuration above. 0 (file's own time zero) when the track has
+  // no grid anchor, which reduces every call site below to the original
+  // "bar 1 starts at the top of the file" assumption.
+  function gridAnchorElapsed(slot) {
+    if (slot.gridAnchor == null) return 0;
+    return slot.gridAnchor * (slot.bpm / slot.effectiveBpm);
   }
 
   function formatClock(seconds) {
@@ -675,11 +737,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       semitoneShift: { value: 0 },
       playing: false,
       // Real MIDI Marker meta-events baked into the file (see
-      // extractMarkers) — the valid mix points for this deck when it's
-      // the anchor. `spans`/pitchMin/pitchMax are the note data and
-      // pitch range for drawing the piano roll; both are populated in
-      // buildParts, once per load, alongside the playback event stream.
+      // extractMarkers) — purely annotations, shown on the piano roll.
+      // `gridAnchor` (see extractGridAnchor) is the track's own native-
+      // time grid-anchor position, or null if it has none — re-anchors
+      // bar 1 for both the automatic phrasing math and the piano roll's
+      // grid. `spans`/pitchMin/pitchMax are the note data and pitch
+      // range for drawing the roll; both populated in buildParts, once
+      // per load, alongside the playback event stream.
       markers: [],
+      gridAnchor: null,
       spans: [],
       pitchMin: 48,
       pitchMax: 72,
@@ -817,6 +883,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const semAval = document.getElementById("semAval");
   const semB = document.getElementById("semB");
   const semBval = document.getElementById("semBval");
+  const phraseLenSel = document.getElementById("phraseLenSel");
   const overlapLenSel = document.getElementById("overlapLenSel");
   const phraseHeader = document.getElementById("phraseHeader");
   const phraseSuggest = document.getElementById("phraseSuggest");
@@ -846,20 +913,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   function refreshMixInAvailability() {
     if (mixState.phase !== "idle" && mixState.phase !== "done") return;
     const roles = getAnchorIncoming();
-    if (!roles || !roles.incoming.midi) {
-      mixIn.disabled = true;
-      return;
-    }
-    // Mix points come entirely from the anchor's own real MIDI markers
-    // now — with none, there's nowhere valid to trigger the mix, so
-    // require them rather than silently falling back to a guess.
-    if (!roles.anchor.markers || roles.anchor.markers.length === 0) {
-      mixIn.disabled = true;
-      mixStateEl.textContent = `Deck ${roles.anchor.name} has no markers — mark it in the MIDI Marker Tool before Beatmatch Mix can find a mix point.`;
-    } else {
-      mixIn.disabled = false;
-      mixStateEl.textContent = `Ready — Deck ${roles.incoming.name} will mix into Deck ${roles.anchor.name} at its next marker.`;
-    }
+    mixIn.disabled = !(roles && roles.incoming.midi);
   }
 
   function liveSlotForDisplay() {
@@ -878,7 +932,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const target = liveSlotForDisplay();
     if (target === focusedSlot) return;
     focusedSlot = target;
-    phraseHeader.textContent = (target && target.barsData) ? `Deck ${target.name} Phrase Grid (live)` : "Phrase Grid";
+    if (target && target.barsData) {
+      phraseHeader.textContent = `Deck ${target.name} Phrase Grid (live)`;
+      phraseLenSel.value = String(suggestPhraseLength(target.barsData));
+    } else {
+      phraseHeader.textContent = "Phrase Grid";
+    }
   }
 
   function resizePhraseCanvas() {
@@ -917,6 +976,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     }
     const duration = slot.duration;
     const barLen = slot.barsData.barLen;
+    // Bar 1 counts from the track's grid anchor (its real first
+    // downbeat, set via the MIDI Marker Tool), not necessarily the
+    // file's own time zero — so the grid can extend backward (negative
+    // bar indices, unlabeled) to cover any intro before it too.
+    const gridAnchorNative = slot.gridAnchor != null ? slot.gridAnchor : 0;
 
     // Grid lines read the theme's own line color so they stay visible
     // (not near-invisible or near-black) in both light and dark mode;
@@ -926,11 +990,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const lineColor = getComputedStyle(document.documentElement).getPropertyValue("--line").trim() || "#352f3f";
     phraseCtx.lineWidth = 1;
     phraseCtx.strokeStyle = lineColor;
-    let bar = 0;
-    while (bar * barLen < duration) {
-      const x = (bar * barLen / duration) * w;
-      phraseCtx.globalAlpha = bar % 4 === 0 ? 0.9 : 0.35;
-      phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
+    let bar = Math.floor((0 - gridAnchorNative) / barLen) - 1;
+    for (;;) {
+      const t = gridAnchorNative + bar * barLen;
+      if (t > duration) break;
+      if (t >= 0) {
+        const x = (t / duration) * w;
+        phraseCtx.globalAlpha = bar % 4 === 0 ? 0.9 : 0.35;
+        phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
+      }
       bar++;
     }
     phraseCtx.globalAlpha = 1;
@@ -962,6 +1030,23 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       }
     });
 
+    // Grid anchor — drawn distinctly from regular markers (cyan, flag
+    // at the TOP instead of the bottom), same convention as the MIDI
+    // Marker Tool, since it's not an annotation, it's the actual
+    // beatgrid reference everything else on this canvas counts from.
+    if (slot.gridAnchor != null) {
+      const x = (slot.gridAnchor / duration) * w;
+      phraseCtx.strokeStyle = "#4fd6ff";
+      phraseCtx.lineWidth = 2;
+      phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
+      phraseCtx.font = "10px monospace";
+      const tw = phraseCtx.measureText("anchor").width + 8;
+      phraseCtx.fillStyle = "#121016";
+      phraseCtx.fillRect(x + 1, 0, tw, 15);
+      phraseCtx.fillStyle = "#4fd6ff";
+      phraseCtx.fillText("anchor", x + 4, 11);
+    }
+
     if (overlapLeftPct !== null) {
       phraseCtx.fillStyle = "rgba(79,214,255,0.16)";
       phraseCtx.fillRect(overlapLeftPct / 100 * w, 0, overlapWidthPct / 100 * w, h);
@@ -981,9 +1066,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       phraseCtx.beginPath(); phraseCtx.moveTo(x, 0); phraseCtx.lineTo(x, h); phraseCtx.stroke();
     }
 
-    phraseSuggest.textContent = slot.markers.length
-      ? `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}`
-      : "⚠ no markers on this track";
+    const markerCountText = `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}`;
+    phraseSuggest.textContent = slot.gridAnchor != null
+      ? `grid anchor set · ${markerCountText}`
+      : `no grid anchor (bar 1 = file start) · ${markerCountText}`;
   }
   window.addEventListener("resize", () => drawPhraseCanvas(null, null, null, null));
 
@@ -1030,6 +1116,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slot.barsData = entry.barsData;
     slot.key = entry.key;
     slot.markers = entry.markers || [];
+    slot.gridAnchor = entry.gridAnchor != null ? entry.gridAnchor : null;
     slot.binId = entry.id;
     slot.semitoneShift.value = 0;
     slot.effectiveBpm = entry.bpm;
@@ -1043,13 +1130,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     nameEl.classList.remove("empty");
     bpmEl.textContent = `${slot.bpm.toFixed(1)} bpm`;
     keyEl.textContent = slot.key ? `Key: ${slot.key.name} (${Math.round(slot.key.score * 100)}%)` : "Key: no tonal center found";
-    if (slot.markers.length > 0) {
-      markerEl.textContent = `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}: ${slot.markers.map((m) => m.label || "?").join(", ")}`;
-      markerEl.classList.remove("warn");
-    } else {
-      markerEl.textContent = "⚠ no markers — Beatmatch Mix needs this track marked first";
-      markerEl.classList.add("warn");
-    }
+    const anchorText = slot.gridAnchor != null ? `grid anchor at ${formatClock(slot.gridAnchor)}` : "no grid anchor (bar 1 = file start)";
+    const markerText = slot.markers.length ? `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}` : "no markers";
+    markerEl.textContent = `${anchorText} · ${markerText}`;
+    markerEl.classList.toggle("warn", slot.gridAnchor == null);
     playBtn.disabled = false;
 
     log(`Loaded "${entry.name}" onto Deck ${which} — ${slot.bpm.toFixed(1)} BPM, ${slot.key ? slot.key.name : "no tonal center"}.`);
@@ -1088,15 +1172,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       const meta = document.createElement("span");
       meta.className = "bin-meta";
       meta.textContent = `${entry.bpm.toFixed(1)} bpm · ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"} · ${entry.duration.toFixed(1)}s · `;
-      const markerSpan = document.createElement("span");
+      const anchorSpan = document.createElement("span");
       const markerCount = entry.markers ? entry.markers.length : 0;
-      if (markerCount > 0) {
-        markerSpan.textContent = `${markerCount} marker${markerCount === 1 ? "" : "s"}`;
+      if (entry.gridAnchor != null) {
+        anchorSpan.textContent = `anchored · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
       } else {
-        markerSpan.className = "bin-marker-warn";
-        markerSpan.textContent = "⚠ no markers";
+        anchorSpan.className = "bin-marker-warn";
+        anchorSpan.textContent = `no grid anchor · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
       }
-      meta.appendChild(markerSpan);
+      meta.appendChild(anchorSpan);
       info.appendChild(nameEl);
       info.appendChild(meta);
       if (slotA.binId === entry.id) {
@@ -1216,7 +1300,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (mixIn.disabled || mixState.phase === "armed" || mixState.phase === "crossfading") return;
     const roles = getAnchorIncoming();
     if (!roles || !roles.incoming.midi) return;
-    if (!roles.anchor.markers || !roles.anchor.markers.length) return;
     mixIn.disabled = true;
     const { anchor, incoming } = roles;
 
@@ -1228,22 +1311,26 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
     // Use the anchor's CURRENT effective tempo, not its native one — if
     // the anchor itself got beatmatched into some earlier deck's tempo,
-    // that's the rate it's actually playing at right now. Overlap length
-    // is still a plain bar count (how LONG the crossfade takes) — only
-    // WHERE it triggers now comes from the anchor's own markers.
+    // that's the rate it's actually playing at right now.
     const barLen = effectiveBarLen(anchor);
+    const L = parseInt(phraseLenSel.value, 10);
     const overlapBars = parseInt(overlapLenSel.value, 10);
+    const phraseLenSec = barLen * L;
     const overlapSec = barLen * overlapBars;
 
-    // Mix points are defined in the anchor's OWN timeline (its
-    // song-time-zero, not Transport-zero — Transport never resets, so
-    // every deck after the first one starts partway through it). Find
-    // the next marker ahead of the anchor's own elapsed position, then
-    // convert back to an absolute Transport time to schedule against.
+    // Phrase boundaries are defined relative to the anchor's own grid
+    // anchor (its real first downbeat, if one's been set via the MIDI
+    // Marker Tool — 0, the file's own time zero, otherwise), not
+    // Transport-zero — Transport never resets, so every deck after the
+    // first one starts partway through it. Find the next boundary
+    // relative to the anchor's own elapsed-since-its-grid-anchor
+    // position, then convert back to an absolute Transport time.
     const now = Tone.Transport.seconds;
     const elapsedInAnchor = now - anchor.transportStartOffset;
-    const next = nextMarkerElapsed(anchor, elapsedInAnchor);
-    const nextPhraseElapsed = next.time;
+    const anchorOffset = gridAnchorElapsed(anchor);
+    const elapsedSinceGridAnchor = elapsedInAnchor - anchorOffset;
+    const nextPhraseElapsedSinceAnchor = Math.ceil((elapsedSinceGridAnchor + 0.05) / phraseLenSec) * phraseLenSec;
+    const nextPhraseElapsed = anchorOffset + nextPhraseElapsedSinceAnchor;
     const nextPhrase = anchor.transportStartOffset + nextPhraseElapsed;
 
     const scale = incoming.bpm / anchor.effectiveBpm;
@@ -1286,9 +1373,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     updateLiveFocus();
     renderBinList();
 
-    const barNum = Math.round(nextPhraseElapsed / barLen) + 1;
-    const markerLabel = (next.marker && next.marker.label) || "(unlabeled)";
-    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter at Deck ${anchor.name}'s "${markerLabel}" marker (bar ${barNum}, t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
+    const barNum = Math.round(nextPhraseElapsedSinceAnchor / barLen) + 1;
+    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter on its own downbeat at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
 
     Tone.Transport.scheduleOnce(() => {
       try {
@@ -1352,7 +1438,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
       const effBarLen = effectiveBarLen(slot);
       const totalBars = Math.max(1, Math.round(effDur / effBarLen));
-      const curBar = Math.min(totalBars, Math.floor(elapsed / effBarLen) + 1);
+      const curBar = Math.floor((elapsed - gridAnchorElapsed(slot)) / effBarLen) + 1;
       timeElapsedEl.textContent = formatClock(elapsed);
       timeTotalEl.textContent = formatClock(effDur);
       timeRemainingEl.textContent = "−" + formatClock(effDur - elapsed);
@@ -1376,8 +1462,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       } else {
         const anchorBarLen = effectiveBarLen(anchor);
         const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
-        const barNum = Math.round(nextPhraseElapsed / anchorBarLen) + 1;
-        mixStateEl.textContent = `Armed — waiting for Deck ${anchor.name}'s next marker (bar ${barNum}) in ${remaining.toFixed(1)}s.`;
+        const barNum = Math.round((nextPhraseElapsed - gridAnchorElapsed(anchor)) / anchorBarLen) + 1;
+        mixStateEl.textContent = `Armed — waiting for the next phrase boundary (bar ${barNum} of Deck ${anchor.name}) in ${remaining.toFixed(1)}s.`;
         if (anchor.duration > 0) {
           const effDur = effectiveDuration(anchor);
           triggerPct = mod(nextPhraseElapsed, effDur) / effDur * 100;
