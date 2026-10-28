@@ -1020,13 +1020,17 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const lineColor = getComputedStyle(document.documentElement).getPropertyValue("--line").trim() || "#352f3f";
     phraseCtx.lineWidth = 1;
     phraseCtx.strokeStyle = lineColor;
+    // Bold lines mark the selected phrase length (the same number the
+    // mix actually triggers on), not a fixed grouping — so what you see
+    // here always matches what "Phrase length" is currently set to.
+    const phraseLenBars = parseInt(phraseLenSel.value, 10) || 4;
     let bar = Math.floor((0 - gridAnchorNative) / barLen) - 1;
     for (;;) {
       const t = gridAnchorNative + bar * barLen;
       if (t > duration) break;
       if (t >= 0) {
         const x = (t / duration) * w;
-        phraseCtx.globalAlpha = bar % 4 === 0 ? 0.9 : 0.35;
+        phraseCtx.globalAlpha = bar % phraseLenBars === 0 ? 0.9 : 0.35;
         phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
       }
       bar++;
