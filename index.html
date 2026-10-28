@@ -659,18 +659,46 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // LOOKAHEAD is kept short so a Stop/reload can't leave much
   // already-queued-ahead audio behind (silenceSynth handles what little
   // might still be in flight).
+  // Binary search for the first event at or after a given native time —
+  // used by makeEventScheduler's fromTime below to find where in the
+  // (pre-sorted) events array a deck's playback should actually begin.
+  function lowerBoundByTime(sortedEvents, t) {
+    let lo = 0, hi = sortedEvents.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sortedEvents[mid].time < t) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+  }
+
   function makeEventScheduler(slot, events, timeScale, loopEnd) {
     const LOOKAHEAD = 0.05;
     let idx = 0;
     let loopsElapsed = 0;
     let startAtContext = null;
     let repeatId = null;
+    // Where this deck's playback actually begins, in native seconds —
+    // 0 normally, or a track's own grid anchor when it's entering a mix
+    // via one (see mixIn): everything before that point in the file
+    // just never plays, the same way triggering a cue point in Traktor
+    // starts a deck there rather than catching up on what came before.
+    // Only the FIRST lap is shortened by this; once the deck loops back
+    // around, lap 2+ plays the full track from its own time zero, same
+    // as any other deck.
+    let fromTime = 0;
+    let firstLapLen = loopEnd;
 
     function fire(ev, fireAtToneTime) {
       const nt = toNativeTime(fireAtToneTime);
       const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
       if (ev.type === "on") slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
       else slot.synth.noteOff(ev.channel, note, { time: nt });
+    }
+
+    function elapsedFor(ev) {
+      return loopsElapsed === 0
+        ? (ev.time - fromTime) * timeScale
+        : firstLapLen + (loopsElapsed - 1) * loopEnd + ev.time * timeScale;
     }
 
     function tick(time) {
@@ -694,7 +722,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       while (guard++ <= events.length) {
         if (idx >= events.length) { idx = 0; loopsElapsed++; }
         const ev = events[idx];
-        const evElapsed = loopsElapsed * loopEnd + ev.time * timeScale;
+        const evElapsed = elapsedFor(ev);
         if (evElapsed > windowEnd) break;
         fire(ev, startAtContext + evElapsed);
         idx++;
@@ -703,10 +731,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
     return {
       get state() { return repeatId !== null ? "started" : "stopped"; },
-      start(at) {
+      start(at, startFromTime) {
         if (repeatId !== null) return;
-        idx = 0;
+        fromTime = startFromTime || 0;
+        idx = lowerBoundByTime(events, fromTime);
         loopsElapsed = 0;
+        firstLapLen = loopEnd - fromTime * timeScale;
         startAtContext = null; // re-calibrated from this start's own first tick, see tick() above
         repeatId = Tone.Transport.scheduleRepeat(tick, LOOKAHEAD, at);
       },
@@ -1338,8 +1368,18 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     silenceSynth(incoming);
     const scaledDuration = incoming.duration * scale;
 
+    // Enter at the incoming track's own grid anchor if it has one — the
+    // same role a hot cue plays in Traktor: the deck's set begins there,
+    // full stop, not at the file's literal start. Nothing before it
+    // ever plays (not "catch up" on the skipped part), so there's no
+    // risk of asking the scheduler to start in the past — nextPhrase
+    // stays the only real scheduling instant, always in the future;
+    // incomingFromTime just changes which event the deck's internal
+    // clock starts counting from. Falls back to 0 (the file's own
+    // start) when the track has no grid anchor, same as before.
+    const incomingFromTime = incoming.gridAnchor != null ? incoming.gridAnchor : 0;
     incoming.eventsPart = makeEventScheduler(incoming, events, scale, scaledDuration);
-    incoming.eventsPart.start(nextPhrase);
+    incoming.eventsPart.start(nextPhrase, incomingFromTime);
 
     const incomingVolSlider = incoming === slotA ? volA : volB;
     const incomingVolLabel = incoming === slotA ? volAval : volBval;
@@ -1364,7 +1404,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
     incoming.playing = true;
     incoming.effectiveBpm = anchor.effectiveBpm;
-    incoming.transportStartOffset = nextPhrase;
+    // transportStartOffset is "the transport time native-time-zero would
+    // land at" — every other formula (elapsed/bar readout, chained-mix
+    // math, gridAnchorElapsed) assumes that, even though native-time-
+    // zero itself is never actually played when entering via a grid
+    // anchor. Shifting it back by the (scaled) anchor offset keeps all
+    // of that consistent: gridAnchorElapsed(incoming) lands exactly on
+    // nextPhrase, same as the anchor's own point lands on-screen.
+    incoming.transportStartOffset = nextPhrase - incomingFromTime * scale;
     mixState.phase = "armed";
     mixState.anchor = anchor;
     mixState.incoming = incoming;
@@ -1374,7 +1421,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     renderBinList();
 
     const barNum = Math.round(nextPhraseElapsedSinceAnchor / barLen) + 1;
-    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter on its own downbeat at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
+    const entryDesc = incomingFromTime > 0 ? `its grid anchor (skipping its first ${incomingFromTime.toFixed(1)}s)` : "its own downbeat";
+    log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter at ${entryDesc} at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
 
     Tone.Transport.scheduleOnce(() => {
       try {
