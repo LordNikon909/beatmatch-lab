@@ -724,13 +724,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slotA = makeSlot("A");
     slotB = makeSlot("B");
 
-    const sfBuffer = await (await fetch("soundfonts/GeneralUserGS.sf3")).arrayBuffer();
+    const sfBuffer = await (await fetch("soundfonts/Arachno_SoundFont_Version_1.0.sf2")).arrayBuffer();
     await Promise.all([
       slotA.synth.soundBankManager.addSoundBank(sfBuffer.slice(0), "main"),
       slotB.synth.soundBankManager.addSoundBank(sfBuffer.slice(0), "main"),
     ]);
     await Promise.all([slotA.synth.isReady, slotB.synth.isReady]);
-    log("Sampler engine ready (GeneralUser GS soundfont, real GM instruments + drum kit).");
+    log("Sampler engine ready (Arachno soundfont, real GM instruments + drum kit).");
   }
 
   function buildParts(slot) {
