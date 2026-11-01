@@ -263,17 +263,6 @@ button.stopall { background: transparent; }
     <p class="sub">Add MIDI files to the bin below — each gets its BPM and key detected on the spot. Load any bin record onto Deck A or Deck B, press Play to go live, then load the next record into the other deck and press Beatmatch Mix. Whichever deck is live is always the anchor; the other deck mixes in. Once the fade completes, load a fresh record into the deck that just went quiet and keep the set going.</p>
   </div>
 
-  <div class="console" id="binPanel">
-    <div class="console-title">Record Bin</div>
-    <label class="filepick" id="pickBin">
-      Add MIDI files to the bin&hellip;
-      <input type="file" accept=".mid,.midi" id="binInput" multiple>
-    </label>
-    <div class="bin-list" id="binList">
-      <p class="hint">No records yet — add a few MIDI files above.</p>
-    </div>
-  </div>
-
   <div class="crossfader">
     <span class="crossfader-label" style="color: var(--accent-a)">A</span>
     <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
@@ -337,6 +326,17 @@ button.stopall { background: transparent; }
         <input type="range" id="semB" min="-12" max="12" value="0">
         <span class="val" id="semBval">0 st</span>
       </div>
+    </div>
+  </div>
+
+  <div class="console" id="binPanel">
+    <div class="console-title">Record Bin</div>
+    <label class="filepick" id="pickBin">
+      Add MIDI files to the bin&hellip;
+      <input type="file" accept=".mid,.midi" id="binInput" multiple>
+    </label>
+    <div class="bin-list" id="binList">
+      <p class="hint">No records yet — add a few MIDI files above.</p>
     </div>
   </div>
 
