@@ -1,1 +1,11 @@
 .DS_Store
+*.tmp
+
+# Soundfonts are large, swappable, user-supplied local assets (see README) —
+# never committed, regardless of format.
+soundfonts/
+
+# Raw/unprocessed source MIDI files — scratch material for producing the
+# *_marked.mid files that actually ship in midis/; not loaded by the app
+# either way (preload only scans the top level of midis/).
+midis/Ignore/
