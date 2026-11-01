@@ -1301,9 +1301,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     renderBinList();
   });
 
-  // One circular button per deck, toggling play/stop — "arm" in the new
-  // UI's terms is exactly today's Play. Shared by the on-screen button
-  // and the Space hotkey below, so both paths stay identical.
+  // One circular button per deck, toggling play/stop directly — always
+  // available by mouse/click regardless of mix state. The Space hotkey
+  // below reaches this too, but only as a fallback when there's no mix
+  // to trigger (see the keydown handler).
   const PLAY_ICON = '<path d="M8 5v14l11-7z"></path>';
   const STOP_ICON = '<path d="M6 6h12v12H6z"></path>';
   function setToggleIcon(iconEl, playing) {
@@ -1427,7 +1428,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     else if (e.key === "Enter") { e.preventDefault(); openTrackMenu(); }
     else if (e.key === " " || e.code === "Space") {
       e.preventDefault();
-      if (selectedDeck) toggleDeck(selectedDeck, selectedDeck === slotA ? "A" : "B");
+      // Context-sensitive, like a single "go" button: once a record's
+      // loaded-but-silent in the other deck while one is live, that's the
+      // automatic mix to trigger (mixIn's own disabled state already
+      // tracks exactly that condition). Otherwise it's just arm/stop on
+      // whichever deck is selected — e.g. starting the very first deck,
+      // when there's nothing yet to mix into.
+      if (!mixIn.disabled) mixIn.click();
+      else if (selectedDeck) toggleDeck(selectedDeck, selectedDeck === slotA ? "A" : "B");
     }
   });
 
