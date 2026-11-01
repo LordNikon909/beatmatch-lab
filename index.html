@@ -48,8 +48,6 @@ body {
   padding-block: 20px 48px;
 }
 .wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
-h1 { font-family: var(--display); font-size: clamp(22px, 4vw, 30px); margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
-.sub { color: var(--fg-dim); font-size: 14px; margin: 2px 0 0; max-width: 68ch; line-height: 1.5; }
 .decks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 680px) { .decks { grid-template-columns: 1fr; } }
 .deck {
@@ -255,11 +253,6 @@ button.pause { background: transparent; }
 </style>
 
 <div class="wrap">
-  <div>
-    <h1>Beat Match Lab</h1>
-    <p class="sub">Select a deck (←/→ or click) and press Enter to open its record bin — each track gets its BPM and key detected on the spot, and you can add more MIDI files right from that menu. Load one, press Space to go live, then load the next record into the other deck and press Space again to Beatmatch Mix. Whichever deck is live is always the anchor; the other deck mixes in. Once the fade completes, load a fresh record into the deck that just went quiet and keep the set going.</p>
-  </div>
-
   <div class="crossfader">
     <span class="crossfader-label" style="color: var(--accent-a)">A</span>
     <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
@@ -284,11 +277,6 @@ button.pause { background: transparent; }
         <div class="deck-title empty" id="nameA">No record loaded</div>
       </div>
       <div class="marker-readout" id="markerA"></div>
-      <div class="row">
-        <label for="volA">Volume</label>
-        <input type="range" id="volA" min="0" max="100" value="85">
-        <span class="val" id="volAval">85%</span>
-      </div>
     </div>
 
     <div class="deck" data-slot="b" id="deckB">
@@ -308,11 +296,6 @@ button.pause { background: transparent; }
         <div class="deck-title empty" id="nameB">No record loaded</div>
       </div>
       <div class="marker-readout" id="markerB"></div>
-      <div class="row">
-        <label for="volB">Volume</label>
-        <input type="range" id="volB" min="0" max="100" value="80">
-        <span class="val" id="volBval">80%</span>
-      </div>
     </div>
   </div>
 
@@ -337,6 +320,16 @@ button.pause { background: transparent; }
           <option value="16">16 bars</option>
           <option value="32">32 bars</option>
         </select>
+      </div>
+      <div class="row">
+        <label for="volA">Volume A</label>
+        <input type="range" id="volA" min="0" max="100" value="85">
+        <span class="val" id="volAval">85%</span>
+      </div>
+      <div class="row">
+        <label for="volB">Volume B</label>
+        <input type="range" id="volB" min="0" max="100" value="80">
+        <span class="val" id="volBval">80%</span>
       </div>
     </div>
 
