@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <title>Beat Match Lab</title>
 <style>
-/* layout: a record bin feeding two decks, a shared phrase-grid visualizer, and a mix console below */
+/* layout: two decks (each its own record-bin menu), a crossfader, and a mix console below */
 :root {
   --bg: #121016;
   --panel: #1c1922;
@@ -68,7 +68,6 @@ h1 { font-family: var(--display); font-size: clamp(22px, 4vw, 30px); margin: 0; 
 .deck.selected { border-color: var(--accent-b); box-shadow: 0 0 0 1px var(--accent-b); }
 .marker-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); min-height: 1.2em; }
 .marker-readout.warn { color: var(--warn); }
-.bin-marker-warn { color: var(--warn); }
 
 /* Deck canvas: the scrolling per-deck piano roll, with play/pill/time/
    title chrome overlaid on top of it (not drawn into the canvas itself,
@@ -167,25 +166,7 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   flex-direction: column;
   gap: 14px;
 }
-.console-title { font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim); }
 .console-controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; }
-
-.bin-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
-.bin-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  background: var(--panel-raised); border: 1px solid var(--line); border-radius: 10px;
-  padding: 10px 12px; flex-wrap: wrap;
-}
-.bin-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
-.bin-name { font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
-.bin-meta { font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); }
-.bin-tag {
-  align-self: flex-start; font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
-  padding: 2px 6px; border-radius: 4px; margin-top: 2px;
-}
-.bin-tag.tag-a { background: var(--accent-a); color: #1a0a10; }
-.bin-tag.tag-b { background: var(--accent-b); color: #07232b; }
-.bin-actions { display: flex; gap: 8px; flex: none; }
 
 /* Restyled, read-only crossfader — reflects live A/B gain balance,
    not draggable. Replaces the old twin level-meter bars. */
@@ -202,9 +183,9 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   transition: left 0.08s linear;
 }
 
-/* Keyboard/mouse-driven track-select menu — a centered overlay, same
-   binEntries data and loadBinEntryIntoDeck the mouse-driven bin list
-   already uses, just a second, navigable way to reach it. */
+/* Keyboard/mouse-driven track-select menu — a centered overlay over
+   binEntries/loadBinEntryIntoDeck; the record bin's whole UI now, both
+   browsing/loading a track onto a deck and adding new files to it. */
 .track-menu-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center;
@@ -276,7 +257,7 @@ button.pause { background: transparent; }
 <div class="wrap">
   <div>
     <h1>Beat Match Lab</h1>
-    <p class="sub">Add MIDI files to the bin below — each gets its BPM and key detected on the spot. Load any bin record onto Deck A or Deck B, press Play to go live, then load the next record into the other deck and press Beatmatch Mix. Whichever deck is live is always the anchor; the other deck mixes in. Once the fade completes, load a fresh record into the deck that just went quiet and keep the set going.</p>
+    <p class="sub">Select a deck (←/→ or click) and press Enter to open its record bin — each track gets its BPM and key detected on the spot, and you can add more MIDI files right from that menu. Load one, press Space to go live, then load the next record into the other deck and press Space again to Beatmatch Mix. Whichever deck is live is always the anchor; the other deck mixes in. Once the fade completes, load a fresh record into the deck that just went quiet and keep the set going.</p>
   </div>
 
   <div class="crossfader">
@@ -345,17 +326,6 @@ button.pause { background: transparent; }
     </div>
   </div>
 
-  <div class="console" id="binPanel">
-    <div class="console-title">Record Bin</div>
-    <label class="filepick" id="pickBin">
-      Add MIDI files to the bin&hellip;
-      <input type="file" accept=".mid,.midi" id="binInput" multiple>
-    </label>
-    <div class="bin-list" id="binList">
-      <p class="hint">No records yet — add a few MIDI files above.</p>
-    </div>
-  </div>
-
   <div class="console">
     <div class="console-controls">
       <div class="row">
@@ -386,7 +356,7 @@ button.pause { background: transparent; }
       <button id="applyTranspose" hidden>Apply suggested transpose</button>
     </div>
 
-    <div class="mix-state" id="mixState">Idle. Press Play on a deck to start the set, load a record into the other deck, then press Beatmatch Mix.</div>
+    <div class="mix-state" id="mixState">Idle. Arm a deck to start the set, load a record into the other deck, then trigger Beatmatch Mix.</div>
 
     <div class="mix-actions">
       <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
@@ -402,6 +372,10 @@ button.pause { background: transparent; }
   <div class="track-menu">
     <div class="track-menu-title" id="trackMenuTitle">Load a record</div>
     <div class="track-menu-list" id="trackMenuList"></div>
+    <label class="filepick" id="pickBin">
+      + Add MIDI files to the bin&hellip;
+      <input type="file" accept=".mid,.midi" id="binInput" multiple>
+    </label>
     <div class="track-menu-hint">↑ / ↓ select · Enter load · Esc cancel</div>
   </div>
 </div>
@@ -964,7 +938,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   // --- DOM refs ---
   const binInput = document.getElementById("binInput");
-  const binList = document.getElementById("binList");
   const deckA = document.getElementById("deckA");
   const deckB = document.getElementById("deckB");
   const nameA = document.getElementById("nameA");
@@ -1235,79 +1208,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     updateHarmony();
     updateLiveFocus();
     refreshMixInAvailability();
-    renderBinList();
-  }
-
-  function renderBinList() {
-    binList.innerHTML = "";
-    if (!slotA || !slotB) {
-      const p = document.createElement("p");
-      p.className = "hint";
-      p.textContent = "Sampler engine isn't running — see the log below.";
-      binList.appendChild(p);
-      return;
-    }
-    if (!binEntries.length) {
-      const p = document.createElement("p");
-      p.className = "hint";
-      p.textContent = "No records yet — add a few MIDI files above.";
-      binList.appendChild(p);
-      return;
-    }
-    binEntries.forEach((entry) => {
-      const row = document.createElement("div");
-      row.className = "bin-row";
-
-      const info = document.createElement("div");
-      info.className = "bin-info";
-      const nameEl = document.createElement("span");
-      nameEl.className = "bin-name";
-      nameEl.textContent = entry.name;
-      const meta = document.createElement("span");
-      meta.className = "bin-meta";
-      meta.textContent = `${entry.bpm.toFixed(1)} bpm · ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"} · ${entry.duration.toFixed(1)}s · `;
-      const anchorSpan = document.createElement("span");
-      const markerCount = entry.markers ? entry.markers.length : 0;
-      if (entry.gridAnchor != null) {
-        anchorSpan.textContent = `anchored · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
-      } else {
-        anchorSpan.className = "bin-marker-warn";
-        anchorSpan.textContent = `no grid anchor · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
-      }
-      meta.appendChild(anchorSpan);
-      info.appendChild(nameEl);
-      info.appendChild(meta);
-      if (slotA.binId === entry.id) {
-        const tag = document.createElement("span");
-        tag.className = "bin-tag tag-a";
-        tag.textContent = "On Deck A" + (slotA.playing ? " · live" : "");
-        info.appendChild(tag);
-      }
-      if (slotB.binId === entry.id) {
-        const tag = document.createElement("span");
-        tag.className = "bin-tag tag-b";
-        tag.textContent = "On Deck B" + (slotB.playing ? " · live" : "");
-        info.appendChild(tag);
-      }
-
-      const actions = document.createElement("div");
-      actions.className = "bin-actions";
-      const mixBusy = mixState.phase === "armed" || mixState.phase === "crossfading";
-      const toA = document.createElement("button");
-      toA.textContent = "→ Deck A";
-      toA.disabled = slotA.playing || mixBusy;
-      toA.addEventListener("click", () => loadBinEntryIntoDeck(entry, "A"));
-      const toB = document.createElement("button");
-      toB.textContent = "→ Deck B";
-      toB.disabled = slotB.playing || mixBusy;
-      toB.addEventListener("click", () => loadBinEntryIntoDeck(entry, "B"));
-      actions.appendChild(toA);
-      actions.appendChild(toB);
-
-      row.appendChild(info);
-      row.appendChild(actions);
-      binList.appendChild(row);
-    });
   }
 
   binInput.addEventListener("change", async () => {
@@ -1324,7 +1224,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       }
     }
     binInput.value = "";
-    renderBinList();
+    if (menuOpen) renderTrackMenu();
   });
 
   // One circular button per deck — arms it (starts it playing), once.
@@ -1348,7 +1248,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     setToggleIcon(toggleIconEl, slot.playing);
     updateLiveFocus();
     refreshMixInAvailability();
-    renderBinList();
   }
 
   toggleA.addEventListener("click", (e) => { e.stopPropagation(); armDeck(slotA, "A"); });
@@ -1378,15 +1277,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   deckA.addEventListener("mouseenter", () => selectDeck(slotA));
   deckB.addEventListener("mouseenter", () => selectDeck(slotB));
 
-  // Track-select menu — a keyboard-navigable second path to the same
-  // binEntries/loadBinEntryIntoDeck the mouse-driven bin list already
-  // uses, Final-Fantasy-menu style: open, move a highlight, confirm.
+  // Track-select menu — the record bin's whole UI, Final-Fantasy-menu
+  // style: open, move a highlight, confirm (or add more files right
+  // from the "+ Add MIDI files" control below the list).
   function renderTrackMenu() {
     trackMenuList.innerHTML = "";
     if (!binEntries.length) {
       const p = document.createElement("p");
       p.className = "hint";
-      p.textContent = "No records yet — add a few MIDI files to the bin.";
+      p.textContent = "No records yet — add a few MIDI files below.";
       trackMenuList.appendChild(p);
       return;
     }
@@ -1407,7 +1306,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   function openTrackMenu() {
-    if (!selectedDeck || !binEntries.length) return;
+    // No `binEntries.length` guard — the menu is also the only way to add
+    // files now (via the picker inside it), so it has to be reachable
+    // even on a totally empty bin.
+    if (!selectedDeck) return;
     menuOpen = true;
     menuHighlightIndex = 0;
     trackMenuTitle.textContent = `Load a record — Deck ${selectedDeck.name}`;
@@ -1618,7 +1520,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     mixState.nextPhrase = nextPhrase;
     mixState.overlapSec = overlapSec;
     updateLiveFocus();
-    renderBinList();
 
     const barNum = Math.round(nextPhraseElapsedSinceAnchor / barLen) + 1;
     const entryDesc = incomingFromTime > 0 ? `its grid anchor (skipping its first ${incomingFromTime.toFixed(1)}s)` : "its own downbeat";
@@ -1634,7 +1535,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         mixIn.disabled = false;
         updateLiveFocus();
         refreshMixInAvailability();
-        renderBinList();
         log(`Crossfade complete. Deck ${anchor.name} stopped; Deck ${incoming.name} continues solo.`);
       } catch (err) {
         log(`Error finishing the crossfade: ${errText(err)}`);
@@ -1658,10 +1558,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     mixState.phase = "idle";
     mixState.anchor = null;
     mixState.incoming = null;
-    mixStateEl.textContent = "Idle. Press Play on a deck to start the set, load a record into the other deck, then press Beatmatch Mix.";
+    mixStateEl.textContent = "Idle. Arm a deck to start the set, load a record into the other deck, then trigger Beatmatch Mix.";
     updateLiveFocus();
     refreshMixInAvailability();
-    renderBinList();
     log("Stopped all decks.");
   });
 
@@ -1810,7 +1709,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         bundle = await res.json();
         names = Object.keys(bundle);
       } catch (err) {
-        log(`No directory listing and no preload bundle found (${errText(err)}) — add records manually instead.`);
+        log(`No directory listing and no preload bundle found (${errText(err)}) — add records from the track-select menu instead.`);
         return;
       }
     }
@@ -1830,11 +1729,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         log(`Could not preload "${name}": ${errText(err)}`);
       }
     }
-    renderBinList();
     log(`Preloaded ${loaded} record(s) from midis/ into the bin${failed ? ` (${failed} failed — see above)` : ""}.`);
   }
 
-  log("Ready. Add a few MIDI files to the bin, load one onto Deck A and press Play, load another onto Deck B, then press Beatmatch Mix.");
+  log("Ready. Select a deck and press Enter to open its record bin, load a track and press Space to go live, then load another into the other deck and press Space again to Beatmatch Mix.");
   try {
     await initAudioEngine();
     await preloadBin();
