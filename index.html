@@ -1245,7 +1245,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     deckB.classList.toggle("selected", selectedDeck === slotB);
   }
   function selectDeck(slot) {
-    if (selectedDeck === slot) return;
+    // A playing deck is locked (see armDeck) — nothing to load onto it,
+    // so it can't be selected either. Only the non-playing deck (or
+    // neither, mid-crossfade when both are briefly live) is selectable.
+    if (slot.playing || selectedDeck === slot) return;
     selectedDeck = slot;
     renderSelection();
   }
@@ -1283,8 +1286,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   function openTrackMenu() {
     // No `binEntries.length` guard — the menu is also the only way to add
     // files now (via the picker inside it), so it has to be reachable
-    // even on a totally empty bin.
-    if (!selectedDeck) return;
+    // even on a totally empty bin. Does check `.playing` though: a deck
+    // can still be the selection when it starts playing (selected, then
+    // armed with Space) — its menu has to stay closed once it's locked.
+    if (!selectedDeck || selectedDeck.playing) return;
     menuOpen = true;
     menuHighlightIndex = 0;
     trackMenuTitle.textContent = `Load a record — Deck ${selectedDeck.name}`;
@@ -1307,9 +1312,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   });
 
   // Clicking a deck's canvas also selects it and opens its menu — the
-  // mouse equivalent of "select, then press confirm".
-  deckCanvasWrapA.addEventListener("click", () => { selectDeck(slotA); openTrackMenu(); });
-  deckCanvasWrapB.addEventListener("click", () => { selectDeck(slotB); openTrackMenu(); });
+  // mouse equivalent of "select, then press confirm". Guarded directly
+  // against the clicked deck being locked (playing), rather than
+  // relying on selectDeck's own no-op, so a click on a live deck can't
+  // fall through to opening whatever deck was selected before it.
+  deckCanvasWrapA.addEventListener("click", () => { if (slotA.playing) return; selectDeck(slotA); openTrackMenu(); });
+  deckCanvasWrapB.addEventListener("click", () => { if (slotB.playing) return; selectDeck(slotB); openTrackMenu(); });
 
   // Global pause — like hitting Start on a SNES game: freezes the whole
   // Transport (so every elapsed/bar/phrase calculation, all keyed off
@@ -1621,6 +1629,17 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     setToggleIcon(toggleIconB, slotB.playing);
     toggleA.disabled = !slotA.midi || slotA.playing;
     toggleB.disabled = !slotB.midi || slotB.playing;
+
+    // Same reasoning as the lines above — a deck can go from selected
+    // to playing outside any click (armed via Space, or becoming the
+    // mix's incoming side), so the selection has to be swept off it
+    // here too, not just refused at selectDeck()/openTrackMenu() time.
+    // Moves to the other deck if that one's free, else just clears.
+    if (selectedDeck && selectedDeck.playing) {
+      const other = selectedDeck === slotA ? slotB : slotA;
+      selectedDeck = other.playing ? null : other;
+      renderSelection();
+    }
 
     requestAnimationFrame(frame);
   }
