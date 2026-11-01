@@ -289,11 +289,6 @@ button.pause { background: transparent; }
         <input type="range" id="volA" min="0" max="100" value="85">
         <span class="val" id="volAval">85%</span>
       </div>
-      <div class="row">
-        <label for="semA">Transpose</label>
-        <input type="range" id="semA" min="-12" max="12" value="0">
-        <span class="val" id="semAval">0 st</span>
-      </div>
     </div>
 
     <div class="deck" data-slot="b" id="deckB">
@@ -317,11 +312,6 @@ button.pause { background: transparent; }
         <label for="volB">Volume</label>
         <input type="range" id="volB" min="0" max="100" value="80">
         <span class="val" id="volBval">80%</span>
-      </div>
-      <div class="row">
-        <label for="semB">Transpose</label>
-        <input type="range" id="semB" min="-12" max="12" value="0">
-        <span class="val" id="semBval">0 st</span>
       </div>
     </div>
   </div>
@@ -962,10 +952,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const volB = document.getElementById("volB");
   const volAval = document.getElementById("volAval");
   const volBval = document.getElementById("volBval");
-  const semA = document.getElementById("semA");
-  const semAval = document.getElementById("semAval");
-  const semB = document.getElementById("semB");
-  const semBval = document.getElementById("semBval");
   const phraseLenSel = document.getElementById("phraseLenSel");
   const overlapLenSel = document.getElementById("overlapLenSel");
   const phraseCanvasA = document.getElementById("phraseCanvasA");
@@ -1171,8 +1157,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const pillBpmEl = which === "A" ? pillBpmA : pillBpmB;
     const markerEl = which === "A" ? markerA : markerB;
     const toggleBtn = which === "A" ? toggleA : toggleB;
-    const semSlider = which === "A" ? semA : semB;
-    const semLabel = which === "A" ? semAval : semBval;
 
     slot.gain.gain.cancelScheduledValues(nativeCtx.currentTime);
     slot.gain.gain.setValueAtTime(0, nativeCtx.currentTime);
@@ -1189,8 +1173,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slot.effectiveBpm = entry.bpm;
     // transportStartOffset gets set inside buildParts (below), once we
     // know the real time it's actually starting at.
-    semSlider.value = 0;
-    semLabel.textContent = "0 st";
 
     await buildParts(slot);
     nameEl.textContent = entry.name;
@@ -1405,23 +1387,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     volBval.textContent = `${volB.value}%`;
     if (slotB && slotB.playing && (mixState.phase === "idle" || mixState.phase === "done")) nativeRampTo(slotB.gain.gain, volB.value / 100, 0.08);
   });
-  semA.addEventListener("input", () => {
-    slotA.semitoneShift.value = parseInt(semA.value, 10);
-    semAval.textContent = `${semA.value} st`;
-  });
-  semB.addEventListener("input", () => {
-    slotB.semitoneShift.value = parseInt(semB.value, 10);
-    semBval.textContent = `${semB.value} st`;
-  });
   applyTranspose.addEventListener("click", (e) => {
     const shift = parseInt(e.target.dataset.shift, 10);
     const deck = e.target.dataset.targetDeck;
     const slot = deck === "A" ? slotA : slotB;
-    const slider = deck === "A" ? semA : semB;
-    const label = deck === "A" ? semAval : semBval;
-    slider.value = shift;
     slot.semitoneShift.value = shift;
-    label.textContent = `${shift} st`;
     log(`Applied suggested transpose: Deck ${deck} shifted ${shift >= 0 ? "+" : ""}${shift} semitones to match the other deck's key.`);
   });
 
