@@ -1612,7 +1612,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   function updateAndDrawDeck(slot, canvas, ctx, remEl, elEl, triggerElapsed, overlapStart, overlapWidth) {
     if (slot.midi && slot.duration > 0) {
       const effDur = effectiveDuration(slot);
-      const elapsed = mod(Tone.Transport.seconds - slot.transportStartOffset, effDur);
+      // Only actually playing (armed, or the incoming side of a mix —
+      // both set `playing = true` the moment they're synced to the
+      // Transport) advances with it; a loaded-but-silent deck stays
+      // parked at its own start instead of silently scrolling along
+      // with whatever's live on the other deck.
+      const elapsed = slot.playing ? mod(Tone.Transport.seconds - slot.transportStartOffset, effDur) : 0;
       remEl.textContent = "−" + formatClock(effDur - elapsed);
       elEl.textContent = "+" + formatClock(elapsed);
       drawDeckCanvas(slot, canvas, ctx, elapsed, effDur, triggerElapsed, overlapStart, overlapWidth);
