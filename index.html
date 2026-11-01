@@ -61,25 +61,62 @@ h1 { font-family: var(--display); font-size: clamp(22px, 4vw, 30px); margin: 0; 
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .deck[data-slot="a"] { border-top: 3px solid var(--accent-a); }
 .deck[data-slot="b"] { border-top: 3px solid var(--accent-b); }
-.deck-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.deck-head-left { display: flex; align-items: center; gap: 8px; }
-.deck-title { font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-dim); }
-.deck[data-slot="a"] .deck-title { color: var(--accent-a); }
-.deck[data-slot="b"] .deck-title { color: var(--accent-b); }
-.bpm-readout { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--fg-dim); }
-.key-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); }
+.deck.selected { border-color: var(--accent-b); box-shadow: 0 0 0 1px var(--accent-b); }
 .marker-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); min-height: 1.2em; }
 .marker-readout.warn { color: var(--warn); }
 .bin-marker-warn { color: var(--warn); }
+
+/* Deck canvas: the scrolling per-deck piano roll, with play/pill/time/
+   title chrome overlaid on top of it (not drawn into the canvas itself,
+   so it stays crisp text and doesn't need re-measuring on every frame). */
+.deck-canvas-wrap {
+  position: relative;
+  height: 190px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #000;
+  cursor: pointer;
+}
+.deck-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.deck-pill {
+  position: absolute; top: 10px; left: 10px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  background: #aa69ff; color: #19092e;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  padding: 5px 10px; border-radius: 20px;
+  transition: background-color 0.15s ease;
+}
+.deck.selected .deck-pill { background: var(--accent-b); color: #07232b; }
+.deck-pill .sep { opacity: 0.6; }
+.deck-time {
+  position: absolute; top: 10px; right: 10px; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums;
+  color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+}
 .live-badge {
+  position: absolute; right: 12px; bottom: 12px; z-index: 2;
   font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
   padding: 2px 6px; border-radius: 4px; background: var(--ok); color: #06241a;
 }
-.track-name { font-size: 14px; min-height: 1.4em; overflow-wrap: anywhere; }
-.track-name.empty { color: var(--fg-dim); font-style: italic; }
+.deck-toggle {
+  position: absolute; left: 12px; bottom: 12px; z-index: 2;
+  width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--ok); border: none; color: #06241a; padding: 0;
+}
+.deck-toggle svg { width: 18px; height: 18px; fill: currentColor; }
+.deck-toggle:disabled { opacity: 0.35; cursor: not-allowed; }
+.deck-title {
+  position: absolute; left: 62px; right: 12px; bottom: 12px; z-index: 2;
+  font-size: 13px; font-weight: 600; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.deck-title.empty { color: rgba(255,255,255,0.6); font-style: italic; }
 
 .filepick {
   border: 1px dashed var(--line);
@@ -150,30 +187,49 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .bin-tag.tag-b { background: var(--accent-b); color: #07232b; }
 .bin-actions { display: flex; gap: 8px; flex: none; }
 
-.phrase-panel { display: flex; flex-direction: column; gap: 8px; }
-.phrase-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.phrase-suggest { font-size: 12px; color: var(--fg-dim); font-family: var(--mono); }
-.phrase-track {
-  position: relative; height: 180px;
-  border: 1px solid var(--line); border-radius: 10px;
-  background: var(--panel-raised); overflow: hidden;
+/* Restyled, read-only crossfader — reflects live A/B gain balance,
+   not draggable. Replaces the old twin level-meter bars. */
+.crossfader { display: flex; align-items: center; gap: 14px; }
+.crossfader-label { font-family: var(--display); font-size: 20px; font-weight: 700; }
+.crossfader-track {
+  position: relative; flex: 1; height: 2px; background: var(--fg); border-radius: 2px;
+  min-width: 0;
 }
-#phraseCanvas { display: block; width: 100%; height: 100%; }
-.phrase-clock {
-  font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
-  color: var(--fg); display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;
+.crossfader-handle {
+  position: absolute; top: 50%; left: 50%;
+  width: 6px; height: 22px; border-radius: 3px;
+  background: var(--fg); transform: translate(-50%, -50%);
+  transition: left 0.08s linear;
 }
-.phrase-clock-sep { color: var(--fg-dim); }
-.phrase-clock-dim { color: var(--fg-dim); }
-.phrase-legend { font-size: 11.5px; color: var(--fg-dim); line-height: 1.5; }
 
-.meter-row { display: flex; gap: 18px; }
-.meter { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
-.meter-label { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); width: 14px; flex: none; }
-.meter-bar { flex: 1; height: 10px; border-radius: 6px; background: var(--panel-raised); overflow: hidden; }
-.meter-fill { height: 100%; width: 0%; transition: width 0.05s linear; }
-#meterA { background: var(--accent-a); }
-#meterB { background: var(--accent-b); }
+/* Keyboard/mouse-driven track-select menu — a centered overlay, same
+   binEntries data and loadBinEntryIntoDeck the mouse-driven bin list
+   already uses, just a second, navigable way to reach it. */
+.track-menu-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 50;
+}
+.track-menu-backdrop[hidden] { display: none; }
+.track-menu {
+  width: min(480px, 90vw); max-height: 70vh;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.track-menu-title {
+  font-family: var(--display); font-size: 13px; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--fg-dim);
+}
+.track-menu-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.track-menu-row {
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.track-menu-row .name { font-size: 13.5px; font-weight: 600; }
+.track-menu-row .meta { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
+.track-menu-row.highlighted { background: var(--accent-b); }
+.track-menu-row.highlighted .name, .track-menu-row.highlighted .meta { color: #07232b; }
+.track-menu-hint { font-size: 11.5px; color: var(--fg-dim); }
 
 .harmony-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .harmony-badge {
@@ -218,22 +274,30 @@ button.stopall { background: transparent; }
     </div>
   </div>
 
+  <div class="crossfader">
+    <span class="crossfader-label" style="color: var(--accent-a)">A</span>
+    <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
+    <span class="crossfader-label" style="color: var(--accent-b)">B</span>
+  </div>
+
   <div class="decks">
-    <div class="deck" data-slot="a">
-      <div class="deck-head">
-        <div class="deck-head-left">
-          <span class="deck-title">Deck A</span>
-          <span class="live-badge" id="liveBadgeA" hidden>LIVE</span>
+    <div class="deck" data-slot="a" id="deckA">
+      <div class="deck-canvas-wrap" id="deckCanvasWrapA">
+        <canvas id="phraseCanvasA"></canvas>
+        <div class="deck-pill" id="pillA">
+          <span id="pillKeyA">—</span><span class="sep">·</span><span id="pillBpmA">— BPM</span>
         </div>
-        <span class="bpm-readout" id="bpmA">— bpm</span>
+        <span class="live-badge" id="liveBadgeA" hidden>LIVE</span>
+        <button class="deck-toggle" id="toggleA" disabled aria-label="Play or stop Deck A">
+          <svg id="toggleIconA" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
+        </button>
+        <div class="deck-time">
+          <span id="timeRemainingA">−0:00</span>
+          <span id="timeElapsedA">+0:00</span>
+        </div>
+        <div class="deck-title empty" id="nameA">No record loaded</div>
       </div>
-      <div class="track-name empty" id="nameA">No record loaded</div>
-      <div class="key-readout" id="keyA">Key: —</div>
       <div class="marker-readout" id="markerA"></div>
-      <div class="deck-buttons">
-        <button class="primary" data-slot="a" id="playA" disabled>Play</button>
-        <button id="stopA" disabled>Stop</button>
-      </div>
       <div class="row">
         <label for="volA">Volume</label>
         <input type="range" id="volA" min="0" max="100" value="85">
@@ -246,21 +310,23 @@ button.stopall { background: transparent; }
       </div>
     </div>
 
-    <div class="deck" data-slot="b">
-      <div class="deck-head">
-        <div class="deck-head-left">
-          <span class="deck-title">Deck B</span>
-          <span class="live-badge" id="liveBadgeB" hidden>LIVE</span>
+    <div class="deck" data-slot="b" id="deckB">
+      <div class="deck-canvas-wrap" id="deckCanvasWrapB">
+        <canvas id="phraseCanvasB"></canvas>
+        <div class="deck-pill" id="pillB">
+          <span id="pillKeyB">—</span><span class="sep">·</span><span id="pillBpmB">— BPM</span>
         </div>
-        <span class="bpm-readout" id="bpmB">— bpm</span>
+        <span class="live-badge" id="liveBadgeB" hidden>LIVE</span>
+        <button class="deck-toggle" id="toggleB" disabled aria-label="Play or stop Deck B">
+          <svg id="toggleIconB" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
+        </button>
+        <div class="deck-time">
+          <span id="timeRemainingB">−0:00</span>
+          <span id="timeElapsedB">+0:00</span>
+        </div>
+        <div class="deck-title empty" id="nameB">No record loaded</div>
       </div>
-      <div class="track-name empty" id="nameB">No record loaded</div>
-      <div class="key-readout" id="keyB">Key: —</div>
       <div class="marker-readout" id="markerB"></div>
-      <div class="deck-buttons">
-        <button class="primary" data-slot="b" id="playB" disabled>Play</button>
-        <button id="stopB" disabled>Stop</button>
-      </div>
       <div class="row">
         <label for="volB">Volume</label>
         <input type="range" id="volB" min="0" max="100" value="80">
@@ -275,26 +341,6 @@ button.stopall { background: transparent; }
   </div>
 
   <div class="console">
-    <div class="phrase-panel">
-      <div class="phrase-panel-head">
-        <span class="console-title" id="phraseHeader">Phrase Grid</span>
-        <span class="phrase-suggest" id="phraseSuggest">No deck is live yet.</span>
-      </div>
-      <div class="phrase-track" id="phraseTrack">
-        <canvas id="phraseCanvas"></canvas>
-      </div>
-      <div class="phrase-clock" id="phraseClock">
-        <span id="timeElapsed">—:—</span>
-        <span class="phrase-clock-sep">/</span>
-        <span id="timeTotal">—:—</span>
-        <span class="phrase-clock-dim">·</span>
-        <span id="timeRemaining">−—:—</span> left
-        <span class="phrase-clock-dim">·</span>
-        <span id="barPosition">bar — / —</span>
-      </div>
-      <p class="phrase-legend">Notes from whichever deck is currently live, colored by channel (percussion in gray). Amber flags = this track's own markers (annotations only). Cyan flag = its grid anchor, if set via the MIDI Marker Tool — re-anchors bar 1 to the track's real first downbeat instead of assuming it's at the file's start. Amber line = playhead. Dashed cyan line = the mix trigger point once armed.</p>
-    </div>
-
     <div class="console-controls">
       <div class="row">
         <label for="phraseLenSel">Phrase length</label>
@@ -318,10 +364,6 @@ button.stopall { background: transparent; }
       </div>
     </div>
 
-    <div class="meter-row">
-      <div class="meter"><span class="meter-label">A</span><div class="meter-bar"><div class="meter-fill" id="meterA"></div></div></div>
-      <div class="meter"><span class="meter-label">B</span><div class="meter-bar"><div class="meter-fill" id="meterB"></div></div></div>
-    </div>
 
     <div class="harmony-row">
       <span class="harmony-badge" id="harmonyBadge">Load a record into each deck to check harmonic compatibility.</span>
@@ -336,6 +378,14 @@ button.stopall { background: transparent; }
     </div>
     <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Phrasing is automatic: it triggers at the next multiple of the selected phrase length, counted from the anchor's grid anchor if it has one (set via the companion MIDI Marker Tool), or from the file's own start otherwise. Assumes 4/4 time and that a record's own MIDI start is its downbeat unless a grid anchor says otherwise. Phrase-length auto-suggestion is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth), so drop in a different .sf2 to change the whole instrument palette.</p>
     <div class="log" id="log"></div>
+  </div>
+</div>
+
+<div class="track-menu-backdrop" id="trackMenuBackdrop" hidden>
+  <div class="track-menu">
+    <div class="track-menu-title" id="trackMenuTitle">Load a record</div>
+    <div class="track-menu-list" id="trackMenuList"></div>
+    <div class="track-menu-hint">↑ / ↓ select · Enter load · Esc cancel</div>
   </div>
 </div>
 
@@ -891,20 +941,26 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // --- DOM refs ---
   const binInput = document.getElementById("binInput");
   const binList = document.getElementById("binList");
+  const deckA = document.getElementById("deckA");
+  const deckB = document.getElementById("deckB");
   const nameA = document.getElementById("nameA");
   const nameB = document.getElementById("nameB");
-  const bpmA = document.getElementById("bpmA");
-  const bpmB = document.getElementById("bpmB");
-  const keyA = document.getElementById("keyA");
-  const keyB = document.getElementById("keyB");
+  const pillKeyA = document.getElementById("pillKeyA");
+  const pillKeyB = document.getElementById("pillKeyB");
+  const pillBpmA = document.getElementById("pillBpmA");
+  const pillBpmB = document.getElementById("pillBpmB");
   const markerA = document.getElementById("markerA");
   const markerB = document.getElementById("markerB");
   const liveBadgeA = document.getElementById("liveBadgeA");
   const liveBadgeB = document.getElementById("liveBadgeB");
-  const playA = document.getElementById("playA");
-  const playB = document.getElementById("playB");
-  const stopA = document.getElementById("stopA");
-  const stopB = document.getElementById("stopB");
+  const toggleA = document.getElementById("toggleA");
+  const toggleB = document.getElementById("toggleB");
+  const toggleIconA = document.getElementById("toggleIconA");
+  const toggleIconB = document.getElementById("toggleIconB");
+  const timeRemainingElA = document.getElementById("timeRemainingA");
+  const timeRemainingElB = document.getElementById("timeRemainingB");
+  const timeElapsedElA = document.getElementById("timeElapsedA");
+  const timeElapsedElB = document.getElementById("timeElapsedB");
   const volA = document.getElementById("volA");
   const volB = document.getElementById("volB");
   const volAval = document.getElementById("volAval");
@@ -915,16 +971,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const semBval = document.getElementById("semBval");
   const phraseLenSel = document.getElementById("phraseLenSel");
   const overlapLenSel = document.getElementById("overlapLenSel");
-  const phraseHeader = document.getElementById("phraseHeader");
-  const phraseSuggest = document.getElementById("phraseSuggest");
-  const timeElapsedEl = document.getElementById("timeElapsed");
-  const timeTotalEl = document.getElementById("timeTotal");
-  const timeRemainingEl = document.getElementById("timeRemaining");
-  const barPositionEl = document.getElementById("barPosition");
-  const phraseCanvas = document.getElementById("phraseCanvas");
-  const phraseCtx = phraseCanvas.getContext("2d");
-  const meterA = document.getElementById("meterA");
-  const meterB = document.getElementById("meterB");
+  const phraseCanvasA = document.getElementById("phraseCanvasA");
+  const phraseCanvasB = document.getElementById("phraseCanvasB");
+  const phraseCtxA = phraseCanvasA.getContext("2d");
+  const phraseCtxB = phraseCanvasB.getContext("2d");
+  const crossfaderHandle = document.getElementById("crossfaderHandle");
+  const trackMenuBackdrop = document.getElementById("trackMenuBackdrop");
+  const trackMenuTitle = document.getElementById("trackMenuTitle");
+  const trackMenuList = document.getElementById("trackMenuList");
   const harmonyBadge = document.getElementById("harmonyBadge");
   const applyTranspose = document.getElementById("applyTranspose");
   const mixStateEl = document.getElementById("mixState");
@@ -932,7 +986,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const stopAllBtn = document.getElementById("stopAll");
 
   const mixState = { phase: "idle", nextPhrase: 0, overlapSec: 0, anchor: null, incoming: null };
-  let focusedSlot = null;
 
   function getAnchorIncoming() {
     if (slotA.playing && !slotB.playing) return { anchor: slotA, incoming: slotB };
@@ -960,107 +1013,93 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   function updateLiveFocus() {
     updateLiveBadges();
     const target = liveSlotForDisplay();
-    if (target === focusedSlot) return;
-    focusedSlot = target;
-    if (target && target.barsData) {
-      phraseHeader.textContent = `Deck ${target.name} Phrase Grid (live)`;
-      phraseLenSel.value = String(suggestPhraseLength(target.barsData));
-    } else {
-      phraseHeader.textContent = "Phrase Grid";
-    }
+    if (target && target.barsData) phraseLenSel.value = String(suggestPhraseLength(target.barsData));
   }
 
-  function resizePhraseCanvas() {
-    const rect = phraseCanvas.getBoundingClientRect();
+  function resizeDeckCanvas(canvas, ctx) {
+    const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(rect.width * dpr));
     const h = Math.max(1, Math.round(rect.height * dpr));
-    if (phraseCanvas.width !== w || phraseCanvas.height !== h) {
-      phraseCanvas.width = w;
-      phraseCanvas.height = h;
-      phraseCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
   }
 
   const PHRASE_CHANNEL_COLORS = ["#4fd6ff", "#ff5b7f", "#ffcf5b", "#35c47a", "#b58cff", "#ff8a5b", "#5bffd0", "#ff5bd6"];
+  // Where "now" sits on screen — content scrolls past this fixed point,
+  // Traktor/Rekordbox-style, rather than a playhead moving across a
+  // static full-track view. Biased left of center so more of what's
+  // coming up is visible than what's already played.
+  const DECK_PLAYHEAD_FRACTION = 0.25;
 
-  // Replaces the old shaded-block/boundary-strength heuristic view with
-  // the deck's actual notes (ported from the MIDI Marker Tool's piano
-  // roll) plus its real markers as flags — the same data Beatmatch Mix
-  // now uses to pick a trigger point, so what you see here is exactly
-  // what's driving the mix. Positions are all in native-time fractions
-  // (time/duration), the same scale-invariant space the playhead
-  // percentage below is already computed in, so this works unchanged
-  // whether the deck is at its native tempo or has been retimed by a
-  // previous mix.
-  function drawPhraseCanvas(playheadPct, triggerPct, overlapLeftPct, overlapWidthPct) {
-    resizePhraseCanvas();
-    const w = phraseCanvas.clientWidth, h = phraseCanvas.clientHeight;
+  // One deck's scrolling piano roll. Unlike the old full-track view
+  // (which worked in native-time fractions, since percent-of-track is
+  // scale-invariant regardless of a deck's current tempo), a scrolling
+  // window needs a real time axis — everything here is expressed in
+  // TRANSPORT-elapsed seconds (the same basis `elapsed` is already in),
+  // so playhead/trigger/overlap need no conversion at all, and each
+  // note/marker/anchor (stored in native MIDI seconds) is converted
+  // with a single multiply by `scale` — the exact ratio mixIn already
+  // uses to retime a track (bpm / effectiveBpm).
+  function drawDeckCanvas(slot, canvas, ctx, elapsed, effDur, triggerElapsed, overlapStart, overlapWidth) {
+    resizeDeckCanvas(canvas, ctx);
+    const w = canvas.clientWidth, h = canvas.clientHeight;
     if (!w || !h) return;
-    phraseCtx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
+    if (!slot.midi || !slot.barsData) return;
 
-    const slot = focusedSlot;
-    if (!slot || !slot.midi || !slot.barsData) {
-      phraseSuggest.textContent = "No deck is live yet.";
-      return;
-    }
-    const duration = slot.duration;
-    const barLen = slot.barsData.barLen;
-    // Bar 1 counts from the track's grid anchor (its real first
-    // downbeat, set via the MIDI Marker Tool), not necessarily the
-    // file's own time zero — so the grid can extend backward (negative
-    // bar indices, unlabeled) to cover any intro before it too.
-    const gridAnchorNative = slot.gridAnchor != null ? slot.gridAnchor : 0;
+    const scale = slot.bpm / slot.effectiveBpm; // native seconds -> transport-elapsed seconds
+    const barLen = effectiveBarLen(slot);
+    const viewDuration = barLen * 4; // always ~4 bars visible, so zoom tracks tempo
+    const viewStart = elapsed - viewDuration * DECK_PLAYHEAD_FRACTION;
+    const xFor = (tTransport) => ((tTransport - viewStart) / viewDuration) * w;
 
-    // Grid lines read the theme's own line color so they stay visible
-    // (not near-invisible or near-black) in both light and dark mode;
-    // the rest of the palette is a fixed accent set, same as the MIDI
-    // Marker Tool, since these need to read as distinct colors more
-    // than they need to match either theme exactly.
+    const gridAnchorTransport = (slot.gridAnchor != null ? slot.gridAnchor : 0) * scale;
     const lineColor = getComputedStyle(document.documentElement).getPropertyValue("--line").trim() || "#352f3f";
-    phraseCtx.lineWidth = 1;
-    phraseCtx.strokeStyle = lineColor;
-    // Bold lines mark the selected phrase length (the same number the
-    // mix actually triggers on), not a fixed grouping — so what you see
-    // here always matches what "Phrase length" is currently set to.
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = lineColor;
     const phraseLenBars = parseInt(phraseLenSel.value, 10) || 4;
-    let bar = Math.floor((0 - gridAnchorNative) / barLen) - 1;
+    let bar = Math.floor((viewStart - gridAnchorTransport) / barLen) - 1;
     for (;;) {
-      const t = gridAnchorNative + bar * barLen;
-      if (t > duration) break;
-      if (t >= 0) {
-        const x = (t / duration) * w;
-        phraseCtx.globalAlpha = bar % phraseLenBars === 0 ? 0.9 : 0.35;
-        phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
-      }
+      const t = gridAnchorTransport + bar * barLen;
+      if (t > viewStart + viewDuration) break;
+      const x = xFor(t);
+      ctx.globalAlpha = bar % phraseLenBars === 0 ? 0.9 : 0.35;
+      ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); ctx.stroke();
       bar++;
     }
-    phraseCtx.globalAlpha = 1;
+    ctx.globalAlpha = 1;
 
     const rowH = Math.max(1.5, h / (slot.pitchMax - slot.pitchMin + 1));
     slot.spans.forEach((s) => {
-      const x = (s.time / duration) * w;
-      const x2 = ((s.time + s.duration) / duration) * w;
+      const t = s.time * scale, t2 = (s.time + s.duration) * scale;
+      if (t2 < viewStart || t > viewStart + viewDuration) return;
+      const x = xFor(t), x2 = xFor(t2);
       const noteW = Math.max(1, x2 - x);
       const y = h - (s.midi - slot.pitchMin + 1) * rowH;
-      phraseCtx.fillStyle = s.channel === 9 ? "#6b6478" : PHRASE_CHANNEL_COLORS[s.channel % PHRASE_CHANNEL_COLORS.length];
-      phraseCtx.globalAlpha = 0.3 + 0.6 * s.velocity;
-      phraseCtx.fillRect(x, y, noteW, Math.max(1, rowH - 1));
+      ctx.fillStyle = s.channel === 9 ? "#6b6478" : PHRASE_CHANNEL_COLORS[s.channel % PHRASE_CHANNEL_COLORS.length];
+      ctx.globalAlpha = 0.3 + 0.6 * s.velocity;
+      ctx.fillRect(x, y, noteW, Math.max(1, rowH - 1));
     });
-    phraseCtx.globalAlpha = 1;
+    ctx.globalAlpha = 1;
 
     slot.markers.forEach((m) => {
-      const x = (m.time / duration) * w;
-      phraseCtx.strokeStyle = "#ffcf5b";
-      phraseCtx.lineWidth = 1.5;
-      phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
+      const t = m.time * scale;
+      if (t < viewStart - 1 || t > viewStart + viewDuration) return;
+      const x = xFor(t);
+      ctx.strokeStyle = "#ffcf5b";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); ctx.stroke();
       if (m.label) {
-        phraseCtx.font = "10px monospace";
-        const tw = phraseCtx.measureText(m.label).width + 8;
-        phraseCtx.fillStyle = "#121016";
-        phraseCtx.fillRect(x + 1, h - 15, tw, 15);
-        phraseCtx.fillStyle = "#ffcf5b";
-        phraseCtx.fillText(m.label, x + 4, h - 4);
+        ctx.font = "10px monospace";
+        const tw = ctx.measureText(m.label).width + 8;
+        ctx.fillStyle = "#121016";
+        ctx.fillRect(x + 1, h - 15, tw, 15);
+        ctx.fillStyle = "#ffcf5b";
+        ctx.fillText(m.label, x + 4, h - 4);
       }
     });
 
@@ -1068,44 +1107,39 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // at the TOP instead of the bottom), same convention as the MIDI
     // Marker Tool, since it's not an annotation, it's the actual
     // beatgrid reference everything else on this canvas counts from.
-    if (slot.gridAnchor != null) {
-      const x = (slot.gridAnchor / duration) * w;
-      phraseCtx.strokeStyle = "#4fd6ff";
-      phraseCtx.lineWidth = 2;
-      phraseCtx.beginPath(); phraseCtx.moveTo(x + 0.5, 0); phraseCtx.lineTo(x + 0.5, h); phraseCtx.stroke();
-      phraseCtx.font = "10px monospace";
-      const tw = phraseCtx.measureText("anchor").width + 8;
-      phraseCtx.fillStyle = "#121016";
-      phraseCtx.fillRect(x + 1, 0, tw, 15);
-      phraseCtx.fillStyle = "#4fd6ff";
-      phraseCtx.fillText("anchor", x + 4, 11);
+    if (slot.gridAnchor != null && gridAnchorTransport >= viewStart - 1 && gridAnchorTransport <= viewStart + viewDuration) {
+      const x = xFor(gridAnchorTransport);
+      ctx.strokeStyle = "#4fd6ff";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); ctx.stroke();
+      ctx.font = "10px monospace";
+      const tw = ctx.measureText("anchor").width + 8;
+      ctx.fillStyle = "#121016";
+      ctx.fillRect(x + 1, 0, tw, 15);
+      ctx.fillStyle = "#4fd6ff";
+      ctx.fillText("anchor", x + 4, 11);
     }
 
-    if (overlapLeftPct !== null) {
-      phraseCtx.fillStyle = "rgba(79,214,255,0.16)";
-      phraseCtx.fillRect(overlapLeftPct / 100 * w, 0, overlapWidthPct / 100 * w, h);
+    if (overlapStart !== null) {
+      ctx.fillStyle = "rgba(79,214,255,0.16)";
+      ctx.fillRect(xFor(overlapStart), 0, (overlapWidth / viewDuration) * w, h);
     }
-    if (triggerPct !== null) {
-      const x = triggerPct / 100 * w;
-      phraseCtx.strokeStyle = "#4fd6ff";
-      phraseCtx.lineWidth = 2;
-      phraseCtx.setLineDash([4, 3]);
-      phraseCtx.beginPath(); phraseCtx.moveTo(x, 0); phraseCtx.lineTo(x, h); phraseCtx.stroke();
-      phraseCtx.setLineDash([]);
-    }
-    if (playheadPct !== null) {
-      const x = playheadPct / 100 * w;
-      phraseCtx.strokeStyle = "#ffcf5b";
-      phraseCtx.lineWidth = 2;
-      phraseCtx.beginPath(); phraseCtx.moveTo(x, 0); phraseCtx.lineTo(x, h); phraseCtx.stroke();
+    if (triggerElapsed !== null) {
+      const x = xFor(triggerElapsed);
+      ctx.strokeStyle = "#4fd6ff";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      ctx.setLineDash([]);
     }
 
-    const markerCountText = `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}`;
-    phraseSuggest.textContent = slot.gridAnchor != null
-      ? `grid anchor set · ${markerCountText}`
-      : `no grid anchor (bar 1 = file start) · ${markerCountText}`;
+    // Playhead is fixed — the content scrolls past it, not the other
+    // way around.
+    const px = DECK_PLAYHEAD_FRACTION * w;
+    ctx.strokeStyle = "#ffcf5b";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke();
   }
-  window.addEventListener("resize", () => drawPhraseCanvas(null, null, null, null));
 
   function updateHarmony() {
     if (!slotA.key || !slotB.key) {
@@ -1134,10 +1168,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const slot = which === "A" ? slotA : slotB;
     if (slot.playing || mixState.phase === "armed" || mixState.phase === "crossfading") return;
     const nameEl = which === "A" ? nameA : nameB;
-    const bpmEl = which === "A" ? bpmA : bpmB;
-    const keyEl = which === "A" ? keyA : keyB;
+    const pillKeyEl = which === "A" ? pillKeyA : pillKeyB;
+    const pillBpmEl = which === "A" ? pillBpmA : pillBpmB;
     const markerEl = which === "A" ? markerA : markerB;
-    const playBtn = which === "A" ? playA : playB;
+    const toggleBtn = which === "A" ? toggleA : toggleB;
     const semSlider = which === "A" ? semA : semB;
     const semLabel = which === "A" ? semAval : semBval;
 
@@ -1162,13 +1196,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     await buildParts(slot);
     nameEl.textContent = entry.name;
     nameEl.classList.remove("empty");
-    bpmEl.textContent = `${slot.bpm.toFixed(1)} bpm`;
-    keyEl.textContent = slot.key ? `Key: ${slot.key.name} (${Math.round(slot.key.score * 100)}%)` : "Key: no tonal center found";
+    pillKeyEl.textContent = slot.key ? slot.key.name : "—";
+    pillBpmEl.textContent = `${slot.bpm.toFixed(1)} BPM`;
     const anchorText = slot.gridAnchor != null ? `grid anchor at ${formatClock(slot.gridAnchor)}` : "no grid anchor (bar 1 = file start)";
     const markerText = slot.markers.length ? `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}` : "no markers";
     markerEl.textContent = `${anchorText} · ${markerText}`;
     markerEl.classList.toggle("warn", slot.gridAnchor == null);
-    playBtn.disabled = false;
+    toggleBtn.disabled = false;
 
     log(`Loaded "${entry.name}" onto Deck ${which} — ${slot.bpm.toFixed(1)} BPM, ${slot.key ? slot.key.name : "no tonal center"}.`);
 
@@ -1267,36 +1301,134 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     renderBinList();
   });
 
-  playA.addEventListener("click", async () => {
-    await ensureAudio();
-    playSlot(slotA, volA.value);
-    log("Deck A playing.");
+  // One circular button per deck, toggling play/stop — "arm" in the new
+  // UI's terms is exactly today's Play. Shared by the on-screen button
+  // and the Space hotkey below, so both paths stay identical.
+  const PLAY_ICON = '<path d="M8 5v14l11-7z"></path>';
+  const STOP_ICON = '<path d="M6 6h12v12H6z"></path>';
+  function setToggleIcon(iconEl, playing) {
+    iconEl.innerHTML = playing ? STOP_ICON : PLAY_ICON;
+  }
+
+  async function toggleDeck(slot, which) {
+    if (!slot.midi) return;
+    const volSlider = which === "A" ? volA : volB;
+    const toggleIconEl = which === "A" ? toggleIconA : toggleIconB;
+    if (slot.playing) {
+      stopSlot(slot);
+      log(`Deck ${which} stopped.`);
+    } else {
+      await ensureAudio();
+      playSlot(slot, volSlider.value);
+      log(`Deck ${which} playing.`);
+    }
+    setToggleIcon(toggleIconEl, slot.playing);
     updateLiveFocus();
     refreshMixInAvailability();
     renderBinList();
-  });
-  stopA.addEventListener("click", () => {
-    stopSlot(slotA);
-    log("Deck A stopped.");
-    updateLiveFocus();
-    refreshMixInAvailability();
-    renderBinList();
+  }
+
+  toggleA.addEventListener("click", (e) => { e.stopPropagation(); toggleDeck(slotA, "A"); });
+  toggleB.addEventListener("click", (e) => { e.stopPropagation(); toggleDeck(slotB, "B"); });
+
+  // --- deck selection + keyboard — stands in for a game controller for
+  // now (D-pad/stick = arrows, A = Enter, B = Esc, a face button =
+  // Space), per the planned key scheme. Mouse hover sets the same
+  // `selectedDeck` state, so both input paths share one source of truth
+  // rather than two parallel highlight systems. ---
+  let selectedDeck = null;
+  let menuOpen = false;
+  let menuHighlightIndex = 0;
+  const deckCanvasWrapA = document.getElementById("deckCanvasWrapA");
+  const deckCanvasWrapB = document.getElementById("deckCanvasWrapB");
+
+  function renderSelection() {
+    deckA.classList.toggle("selected", selectedDeck === slotA);
+    deckB.classList.toggle("selected", selectedDeck === slotB);
+  }
+  function selectDeck(slot) {
+    if (selectedDeck === slot) return;
+    selectedDeck = slot;
+    renderSelection();
+  }
+  deckA.addEventListener("mouseenter", () => selectDeck(slotA));
+  deckB.addEventListener("mouseenter", () => selectDeck(slotB));
+
+  // Track-select menu — a keyboard-navigable second path to the same
+  // binEntries/loadBinEntryIntoDeck the mouse-driven bin list already
+  // uses, Final-Fantasy-menu style: open, move a highlight, confirm.
+  function renderTrackMenu() {
+    trackMenuList.innerHTML = "";
+    if (!binEntries.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = "No records yet — add a few MIDI files to the bin.";
+      trackMenuList.appendChild(p);
+      return;
+    }
+    binEntries.forEach((entry, i) => {
+      const row = document.createElement("div");
+      row.className = "track-menu-row" + (i === menuHighlightIndex ? " highlighted" : "");
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = entry.name;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const markerCount = entry.markers ? entry.markers.length : 0;
+      meta.textContent = `${entry.bpm.toFixed(1)} bpm · ${entry.key ? entry.key.name : "no tonal center"} · ${entry.gridAnchor != null ? "anchored" : "no anchor"} · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
+      row.append(name, meta);
+      row.addEventListener("click", () => { menuHighlightIndex = i; confirmMenuSelection(); });
+      trackMenuList.appendChild(row);
+    });
+  }
+
+  function openTrackMenu() {
+    if (!selectedDeck || !binEntries.length) return;
+    menuOpen = true;
+    menuHighlightIndex = 0;
+    trackMenuTitle.textContent = `Load a record — Deck ${selectedDeck.name}`;
+    renderTrackMenu();
+    trackMenuBackdrop.hidden = false;
+  }
+  function closeTrackMenu() {
+    menuOpen = false;
+    trackMenuBackdrop.hidden = true;
+  }
+  function confirmMenuSelection() {
+    const entry = binEntries[menuHighlightIndex];
+    if (!entry || !selectedDeck) { closeTrackMenu(); return; }
+    const which = selectedDeck === slotA ? "A" : "B";
+    loadBinEntryIntoDeck(entry, which);
+    closeTrackMenu();
+  }
+  trackMenuBackdrop.addEventListener("click", (e) => {
+    if (e.target === trackMenuBackdrop) closeTrackMenu();
   });
 
-  playB.addEventListener("click", async () => {
-    await ensureAudio();
-    playSlot(slotB, volB.value);
-    log("Deck B playing.");
-    updateLiveFocus();
-    refreshMixInAvailability();
-    renderBinList();
-  });
-  stopB.addEventListener("click", () => {
-    stopSlot(slotB);
-    log("Deck B stopped.");
-    updateLiveFocus();
-    refreshMixInAvailability();
-    renderBinList();
+  // Clicking a deck's canvas also selects it and opens its menu — the
+  // mouse equivalent of "select, then press confirm".
+  deckCanvasWrapA.addEventListener("click", () => { selectDeck(slotA); openTrackMenu(); });
+  deckCanvasWrapB.addEventListener("click", () => { selectDeck(slotB); openTrackMenu(); });
+
+  window.addEventListener("keydown", (e) => {
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
+    if (menuOpen) {
+      if (e.key === "ArrowUp") { e.preventDefault(); menuHighlightIndex = Math.max(0, menuHighlightIndex - 1); renderTrackMenu(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); menuHighlightIndex = Math.min(binEntries.length - 1, menuHighlightIndex + 1); renderTrackMenu(); }
+      else if (e.key === "Enter") { e.preventDefault(); confirmMenuSelection(); }
+      else if (e.key === "Escape") { e.preventDefault(); closeTrackMenu(); }
+      return;
+    }
+
+    if (e.key === "ArrowLeft") { e.preventDefault(); selectDeck(slotA); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); selectDeck(slotB); }
+    else if (e.key === "Enter") { e.preventDefault(); openTrackMenu(); }
+    else if (e.key === " " || e.code === "Space") {
+      e.preventDefault();
+      if (selectedDeck) toggleDeck(selectedDeck, selectedDeck === slotA ? "A" : "B");
+    }
   });
 
   volA.addEventListener("input", () => {
@@ -1469,6 +1601,20 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     log("Stopped all decks.");
   });
 
+  function updateAndDrawDeck(slot, canvas, ctx, remEl, elEl, triggerElapsed, overlapStart, overlapWidth) {
+    if (slot.midi && slot.duration > 0) {
+      const effDur = effectiveDuration(slot);
+      const elapsed = mod(Tone.Transport.seconds - slot.transportStartOffset, effDur);
+      remEl.textContent = "−" + formatClock(effDur - elapsed);
+      elEl.textContent = "+" + formatClock(elapsed);
+      drawDeckCanvas(slot, canvas, ctx, elapsed, effDur, triggerElapsed, overlapStart, overlapWidth);
+    } else {
+      remEl.textContent = "−0:00";
+      elEl.textContent = "+0:00";
+      drawDeckCanvas(slot, canvas, ctx, 0, 0, null, null, null);
+    }
+  }
+
   function frame() {
     if (!slotA || !slotB) { requestAnimationFrame(frame); return; }
     // Two independent AudioContexts don't necessarily run at exactly the
@@ -1481,33 +1627,20 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (Tone.context.state === "running" && nativeCtx.state === "running") {
       clockOffset = Tone.context.currentTime - nativeCtx.currentTime;
     }
-    const slot = focusedSlot;
-    let playheadPct = null;
-    if (slot && slot.duration > 0) {
-      const effDur = effectiveDuration(slot);
-      const elapsed = mod(Tone.Transport.seconds - slot.transportStartOffset, effDur);
-      playheadPct = elapsed / effDur * 100;
+    // Live gain balance drives the (read-only, restyled) crossfader —
+    // 0 = fully A, 1 = fully B.
+    const totalGain = slotA.gain.gain.value + slotB.gain.gain.value;
+    const xfaderPos = totalGain > 0.0001 ? slotB.gain.gain.value / totalGain : 0.5;
+    crossfaderHandle.style.left = (xfaderPos * 100) + "%";
 
-      const effBarLen = effectiveBarLen(slot);
-      const totalBars = Math.max(1, Math.round(effDur / effBarLen));
-      const curBar = Math.floor((elapsed - gridAnchorElapsed(slot)) / effBarLen) + 1;
-      timeElapsedEl.textContent = formatClock(elapsed);
-      timeTotalEl.textContent = formatClock(effDur);
-      timeRemainingEl.textContent = "−" + formatClock(effDur - elapsed);
-      barPositionEl.textContent = `bar ${curBar} / ${totalBars}`;
-    } else {
-      timeElapsedEl.textContent = "—:—";
-      timeTotalEl.textContent = "—:—";
-      timeRemainingEl.textContent = "−—:—";
-      barPositionEl.textContent = "bar — / —";
-    }
-
-    meterA.style.width = Math.min(100, slotA.gain.gain.value * 100) + "%";
-    meterB.style.width = Math.min(100, slotB.gain.gain.value * 100) + "%";
-
-    let triggerPct = null, overlapLeftPct = null, overlapWidthPct = null;
+    // Trigger/overlap overlays only ever apply to whichever deck is
+    // currently the mix anchor — computed once here, in TRANSPORT-
+    // elapsed seconds (the same basis drawDeckCanvas's own `elapsed`
+    // is in, so no conversion needed when handed to it below).
+    let mixAnchor = null, triggerElapsed = null, overlapStart = null, overlapWidth = null;
     if (mixState.phase === "armed") {
       const anchor = mixState.anchor;
+      mixAnchor = anchor;
       const remaining = mixState.nextPhrase - Tone.Transport.seconds;
       if (remaining <= 0) {
         mixState.phase = "crossfading";
@@ -1518,23 +1651,34 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         mixStateEl.textContent = `Armed — waiting for the next phrase boundary (bar ${barNum} of Deck ${anchor.name}) in ${remaining.toFixed(1)}s.`;
         if (anchor.duration > 0) {
           const effDur = effectiveDuration(anchor);
-          triggerPct = mod(nextPhraseElapsed, effDur) / effDur * 100;
+          triggerElapsed = mod(nextPhraseElapsed, effDur);
         }
       }
     } else if (mixState.phase === "crossfading") {
       const anchor = mixState.anchor, incoming = mixState.incoming;
+      mixAnchor = anchor;
       const elapsed = Tone.Transport.seconds - mixState.nextPhrase;
       const pct = Math.min(100, Math.round(elapsed / mixState.overlapSec * 100));
       mixStateEl.textContent = `Crossfading… ${pct}% — Deck ${incoming.name} fading in, Deck ${anchor.name} fading out.`;
       if (anchor.duration > 0) {
         const effDur = effectiveDuration(anchor);
         const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
-        overlapLeftPct = mod(nextPhraseElapsed, effDur) / effDur * 100;
-        overlapWidthPct = Math.min(100 - overlapLeftPct, (mixState.overlapSec / effDur) * 100);
+        overlapStart = mod(nextPhraseElapsed, effDur);
+        overlapWidth = Math.min(effDur - overlapStart, mixState.overlapSec);
       }
     }
 
-    drawPhraseCanvas(playheadPct, triggerPct, overlapLeftPct, overlapWidthPct);
+    updateAndDrawDeck(slotA, phraseCanvasA, phraseCtxA, timeRemainingElA, timeElapsedElA,
+      mixAnchor === slotA ? triggerElapsed : null, mixAnchor === slotA ? overlapStart : null, mixAnchor === slotA ? overlapWidth : null);
+    updateAndDrawDeck(slotB, phraseCanvasB, phraseCtxB, timeRemainingElB, timeElapsedElB,
+      mixAnchor === slotB ? triggerElapsed : null, mixAnchor === slotB ? overlapStart : null, mixAnchor === slotB ? overlapWidth : null);
+
+    // Driven by state every frame, not just on click — the mix anchor
+    // stops (and the incoming deck starts) directly inside mixIn, not
+    // through toggleDeck(), so a click-only update would miss those.
+    setToggleIcon(toggleIconA, slotA.playing);
+    setToggleIcon(toggleIconB, slotB.playing);
+
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
