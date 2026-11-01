@@ -1609,15 +1609,22 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     log("Stopped all decks.");
   });
 
-  function updateAndDrawDeck(slot, canvas, ctx, remEl, elEl, triggerElapsed, overlapStart, overlapWidth) {
+  function updateAndDrawDeck(slot, otherSlot, canvas, ctx, remEl, elEl, triggerElapsed, overlapStart, overlapWidth) {
     if (slot.midi && slot.duration > 0) {
       const effDur = effectiveDuration(slot);
       // Only actually playing (armed, or the incoming side of a mix —
       // both set `playing = true` the moment they're synced to the
       // Transport) advances with it; a loaded-but-silent deck stays
-      // parked at its own start instead of silently scrolling along
-      // with whatever's live on the other deck.
-      const elapsed = slot.playing ? mod(Tone.Transport.seconds - slot.transportStartOffset, effDur) : 0;
+      // parked instead of silently scrolling along with whatever's live
+      // on the other deck. Parked WHERE depends on how it'll actually
+      // start: if the other deck is already live, this one is set up to
+      // mix in at its own grid anchor (same hot-cue-style entry mixIn
+      // uses) rather than the file's literal start, so preview it
+      // there. Otherwise (nothing live yet — the first deck of a set)
+      // it'll start with plain Play, from the file's own beginning.
+      const elapsed = slot.playing
+        ? mod(Tone.Transport.seconds - slot.transportStartOffset, effDur)
+        : (otherSlot.playing ? gridAnchorElapsed(slot) : 0);
       remEl.textContent = "−" + formatClock(effDur - elapsed);
       elEl.textContent = "+" + formatClock(elapsed);
       drawDeckCanvas(slot, canvas, ctx, elapsed, effDur, triggerElapsed, overlapStart, overlapWidth);
@@ -1681,9 +1688,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       }
     }
 
-    updateAndDrawDeck(slotA, phraseCanvasA, phraseCtxA, timeRemainingElA, timeElapsedElA,
+    updateAndDrawDeck(slotA, slotB, phraseCanvasA, phraseCtxA, timeRemainingElA, timeElapsedElA,
       mixAnchor === slotA ? triggerElapsed : null, mixAnchor === slotA ? overlapStart : null, mixAnchor === slotA ? overlapWidth : null);
-    updateAndDrawDeck(slotB, phraseCanvasB, phraseCtxB, timeRemainingElB, timeElapsedElB,
+    updateAndDrawDeck(slotB, slotA, phraseCanvasB, phraseCtxB, timeRemainingElB, timeElapsedElB,
       mixAnchor === slotB ? triggerElapsed : null, mixAnchor === slotB ? overlapStart : null, mixAnchor === slotB ? overlapWidth : null);
 
     // Driven by state every frame, not just on click — the mix anchor
