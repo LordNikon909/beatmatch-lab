@@ -231,6 +231,21 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .track-menu-row.highlighted .name, .track-menu-row.highlighted .meta { color: #07232b; }
 .track-menu-hint { font-size: 11.5px; color: var(--fg-dim); }
 
+.pause-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 60; cursor: pointer;
+}
+.pause-overlay[hidden] { display: none; }
+.pause-title {
+  font-family: var(--display); font-size: 48px; font-weight: 700;
+  letter-spacing: 0.15em; color: #fff; text-align: center;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.8);
+  animation: pauseBlink 1.2s steps(1) infinite;
+}
+.pause-hint { margin-top: 12px; font-family: var(--mono); font-size: 13px; color: rgba(255, 255, 255, 0.75); text-align: center; }
+@keyframes pauseBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.35; } }
+
 .harmony-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .harmony-badge {
   font-size: 13px; padding: 6px 10px; border-radius: 8px;
@@ -248,6 +263,7 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .mix-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 button.mixin { background: linear-gradient(90deg, var(--accent-a), var(--accent-b)); color: #110b16; border: none; }
 button.stopall { background: transparent; }
+button.pause { background: transparent; }
 
 .log {
   background: #000; color: #8fe88f; font-family: var(--mono);
@@ -374,6 +390,7 @@ button.stopall { background: transparent; }
 
     <div class="mix-actions">
       <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
+      <button class="pause" id="pauseBtn">Pause</button>
       <button class="stopall" id="stopAll">Stop All</button>
     </div>
     <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Phrasing is automatic: it triggers at the next multiple of the selected phrase length, counted from the anchor's grid anchor if it has one (set via the companion MIDI Marker Tool), or from the file's own start otherwise. Assumes 4/4 time and that a record's own MIDI start is its downbeat unless a grid anchor says otherwise. Phrase-length auto-suggestion is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth), so drop in a different .sf2 to change the whole instrument palette.</p>
@@ -386,6 +403,13 @@ button.stopall { background: transparent; }
     <div class="track-menu-title" id="trackMenuTitle">Load a record</div>
     <div class="track-menu-list" id="trackMenuList"></div>
     <div class="track-menu-hint">↑ / ↓ select · Enter load · Esc cancel</div>
+  </div>
+</div>
+
+<div class="pause-overlay" id="pauseOverlay" hidden>
+  <div>
+    <div class="pause-title">PAUSED</div>
+    <div class="pause-hint">Press P (or click anywhere) to resume</div>
   </div>
 </div>
 
@@ -984,6 +1008,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const mixStateEl = document.getElementById("mixState");
   const mixIn = document.getElementById("mixIn");
   const stopAllBtn = document.getElementById("stopAll");
+  const pauseBtn = document.getElementById("pauseBtn");
+  const pauseOverlay = document.getElementById("pauseOverlay");
 
   const mixState = { phase: "idle", nextPhrase: 0, overlapSec: 0, anchor: null, incoming: null };
 
@@ -1301,36 +1327,32 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     renderBinList();
   });
 
-  // One circular button per deck, toggling play/stop directly — always
-  // available by mouse/click regardless of mix state. The Space hotkey
-  // below reaches this too, but only as a fallback when there's no mix
-  // to trigger (see the keydown handler).
+  // One circular button per deck — arms it (starts it playing), once.
+  // A playing deck is locked: neither this button nor the Space hotkey
+  // can stop it anymore (see the keydown handler) — the only ways a
+  // live deck goes quiet now are the Beatmatch Mix fading it out
+  // automatically, Stop All, or Pause freezing everything in place.
   const PLAY_ICON = '<path d="M8 5v14l11-7z"></path>';
   const STOP_ICON = '<path d="M6 6h12v12H6z"></path>';
   function setToggleIcon(iconEl, playing) {
     iconEl.innerHTML = playing ? STOP_ICON : PLAY_ICON;
   }
 
-  async function toggleDeck(slot, which) {
-    if (!slot.midi) return;
+  async function armDeck(slot, which) {
+    if (!slot.midi || slot.playing) return;
     const volSlider = which === "A" ? volA : volB;
     const toggleIconEl = which === "A" ? toggleIconA : toggleIconB;
-    if (slot.playing) {
-      stopSlot(slot);
-      log(`Deck ${which} stopped.`);
-    } else {
-      await ensureAudio();
-      playSlot(slot, volSlider.value);
-      log(`Deck ${which} playing.`);
-    }
+    await ensureAudio();
+    playSlot(slot, volSlider.value);
+    log(`Deck ${which} playing.`);
     setToggleIcon(toggleIconEl, slot.playing);
     updateLiveFocus();
     refreshMixInAvailability();
     renderBinList();
   }
 
-  toggleA.addEventListener("click", (e) => { e.stopPropagation(); toggleDeck(slotA, "A"); });
-  toggleB.addEventListener("click", (e) => { e.stopPropagation(); toggleDeck(slotB, "B"); });
+  toggleA.addEventListener("click", (e) => { e.stopPropagation(); armDeck(slotA, "A"); });
+  toggleB.addEventListener("click", (e) => { e.stopPropagation(); armDeck(slotB, "B"); });
 
   // --- deck selection + keyboard — stands in for a game controller for
   // now (D-pad/stick = arrows, A = Enter, B = Esc, a face button =
@@ -1340,6 +1362,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   let selectedDeck = null;
   let menuOpen = false;
   let menuHighlightIndex = 0;
+  let paused = false;
   const deckCanvasWrapA = document.getElementById("deckCanvasWrapA");
   const deckCanvasWrapB = document.getElementById("deckCanvasWrapB");
 
@@ -1411,9 +1434,41 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   deckCanvasWrapA.addEventListener("click", () => { selectDeck(slotA); openTrackMenu(); });
   deckCanvasWrapB.addEventListener("click", () => { selectDeck(slotB); openTrackMenu(); });
 
+  // Global pause — like hitting Start on a SNES game: freezes the whole
+  // Transport (so every elapsed/bar/phrase calculation, all keyed off
+  // Tone.Transport.seconds, just stops advancing) AND suspends the
+  // native AudioContext the synths and gain ramps actually run on, so
+  // nothing continues to sound or ring out underneath the overlay —
+  // a true freeze, not just a mute. Resuming un-suspends both and
+  // re-syncs clockOffset immediately rather than waiting a frame.
+  async function togglePause() {
+    if (!slotA || !slotB) return;
+    if (!paused) {
+      paused = true;
+      if (Tone.Transport.state === "started") Tone.Transport.pause();
+      if (nativeCtx.state === "running") await nativeCtx.suspend();
+      pauseOverlay.hidden = false;
+      log("Paused.");
+    } else {
+      paused = false;
+      if (nativeCtx.state === "suspended") await nativeCtx.resume();
+      if (Tone.Transport.state === "paused") Tone.Transport.start();
+      if (Tone.context.state === "running" && nativeCtx.state === "running") {
+        clockOffset = Tone.context.currentTime - nativeCtx.currentTime;
+      }
+      pauseOverlay.hidden = true;
+      log("Resumed.");
+    }
+  }
+  pauseBtn.addEventListener("click", () => togglePause());
+  pauseOverlay.addEventListener("click", () => togglePause());
+
   window.addEventListener("keydown", (e) => {
     const tag = document.activeElement && document.activeElement.tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
+    if (e.key === "p" || e.key === "P") { e.preventDefault(); togglePause(); return; }
+    if (paused) return; // everything else is frozen until resumed
 
     if (menuOpen) {
       if (e.key === "ArrowUp") { e.preventDefault(); menuHighlightIndex = Math.max(0, menuHighlightIndex - 1); renderTrackMenu(); }
@@ -1431,11 +1486,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       // Context-sensitive, like a single "go" button: once a record's
       // loaded-but-silent in the other deck while one is live, that's the
       // automatic mix to trigger (mixIn's own disabled state already
-      // tracks exactly that condition). Otherwise it's just arm/stop on
+      // tracks exactly that condition). Otherwise it's just arming
       // whichever deck is selected — e.g. starting the very first deck,
-      // when there's nothing yet to mix into.
+      // when there's nothing yet to mix into. A deck that's already
+      // playing is locked — armDeck no-ops rather than stopping it.
       if (!mixIn.disabled) mixIn.click();
-      else if (selectedDeck) toggleDeck(selectedDeck, selectedDeck === slotA ? "A" : "B");
+      else if (selectedDeck) armDeck(selectedDeck, selectedDeck === slotA ? "A" : "B");
     }
   });
 
@@ -1695,9 +1751,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
     // Driven by state every frame, not just on click — the mix anchor
     // stops (and the incoming deck starts) directly inside mixIn, not
-    // through toggleDeck(), so a click-only update would miss those.
+    // through armDeck(), so a click-only update would miss those. A
+    // playing deck's button is disabled here too — locked, same as the
+    // keyboard side — so it can only ever be armed, never stopped,
+    // through this control.
     setToggleIcon(toggleIconA, slotA.playing);
     setToggleIcon(toggleIconB, slotB.playing);
+    toggleA.disabled = !slotA.midi || slotA.playing;
+    toggleB.disabled = !slotB.midi || slotB.playing;
 
     requestAnimationFrame(frame);
   }

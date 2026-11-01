@@ -47,7 +47,10 @@ You can still add more records manually from the page at any time — the preloa
   | Enter | Opens the track-select menu for the selected deck; inside the menu, loads the highlighted record and closes it |
   | ↑ / ↓ | Moves the highlight inside the track-select menu |
   | Esc | Closes the menu without loading anything |
-  | Space | Triggers the automatic Beatmatch Mix once a record is loaded in the other (silent) deck while one is live; otherwise arms (plays) or stops the selected deck — e.g. starting the very first deck, when there's nothing yet to mix into |
+  | Space | Triggers the automatic Beatmatch Mix once a record is loaded in the other (silent) deck while one is live; otherwise arms (plays) the selected deck — e.g. starting the very first deck, when there's nothing yet to mix into |
+  | P | Pauses or resumes everything — a true freeze (the Transport and the audio engine both stop), with a full-screen "PAUSED" overlay, like pausing a game |
+
+  A deck that's already playing is locked — once armed, neither Space nor its on-screen button can stop it again. The only ways a live deck goes quiet are Beatmatch Mix fading it out automatically, Stop All, or Pause freezing everything in place.
 
   Clicking directly on a deck's canvas does the same as Left/Right + Enter — selects it and opens its menu. The original mouse-driven record bin (upload, "→ Deck A/B" buttons) still works exactly as before; the menu is a second path to the same `loadBinEntryIntoDeck` call, not a replacement.
 - **Beatmatch Mix** — whichever deck is currently live is the anchor; press the button to retime the other (staged) deck onto the anchor's tempo, wait for the anchor's next phrase boundary, enter the incoming deck on its own first downbeat (or its grid anchor, if it has one — see below), and auto-crossfade over a configurable number of bars. The anchor then fades out and stops, handing "live" status to the deck that just mixed in — load a fresh record into the newly silent deck to keep the set going indefinitely. Phrasing is fully automatic (a configurable 2/4/8/16-bar grid) and never blocked by a record's markers.
