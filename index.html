@@ -261,7 +261,6 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 }
 .track-menu-row .name-block { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .track-menu-row .name { font-size: 13.5px; font-weight: 700; color: var(--text-on-chrome); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.track-menu-row .meta { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
 .track-menu-col-key { flex: 0 0 112px; }
 .track-menu-row .key-pill {
   display: inline-block; background: var(--accent-purple); color: #fff;
@@ -1416,7 +1415,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (!binEntries.length) {
       const p = document.createElement("p");
       p.className = "hint";
-      p.textContent = "No records yet — add a few MIDI files below.";
+      p.textContent = "No records in the bin — drop a few into midis/ and reload.";
       trackMenuList.appendChild(p);
       return;
     }
@@ -1440,11 +1439,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       const name = document.createElement("div");
       name.className = "name";
       name.textContent = entry.name;
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      const markerCount = entry.markers ? entry.markers.length : 0;
-      meta.textContent = `${entry.gridAnchor != null ? "anchored" : "no anchor"} · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
-      nameBlock.append(name, meta);
+      nameBlock.append(name);
       colName.appendChild(nameBlock);
 
       const colKey = document.createElement("div");
