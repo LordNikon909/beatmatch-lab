@@ -1142,6 +1142,38 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     applyTranspose.hidden = false;
   }
 
+  // The inverse of loadBinEntryIntoDeck below — resets a deck's loaded
+  // track back to the empty "No record loaded" state. Used once a deck
+  // auto-stops after mixing out, so it visibly looks ready for a fresh
+  // load rather than showing a dead, no-longer-playing track.
+  function clearDeck(slot, which) {
+    const nameEl = which === "A" ? nameA : nameB;
+    const pillKeyEl = which === "A" ? pillKeyA : pillKeyB;
+    const pillBpmEl = which === "A" ? pillBpmA : pillBpmB;
+    const markerEl = which === "A" ? markerA : markerB;
+    const toggleBtn = which === "A" ? toggleA : toggleB;
+
+    slot.midi = null;
+    slot.bpm = 120;
+    slot.duration = 0;
+    slot.barsData = null;
+    slot.key = null;
+    slot.markers = [];
+    slot.gridAnchor = null;
+    slot.binId = null;
+    slot.effectiveBpm = 120;
+
+    nameEl.textContent = "No record loaded";
+    nameEl.classList.add("empty");
+    pillKeyEl.textContent = "—";
+    pillBpmEl.textContent = "— BPM";
+    markerEl.textContent = "";
+    markerEl.classList.remove("warn");
+    toggleBtn.disabled = true;
+
+    updateHarmony();
+  }
+
   async function loadBinEntryIntoDeck(entry, which) {
     const slot = which === "A" ? slotA : slotB;
     if (slot.playing || mixState.phase === "armed" || mixState.phase === "crossfading") return;
@@ -1501,6 +1533,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         if (anchor.eventsPart) anchor.eventsPart.stop();
         silenceSynth(anchor);
         anchor.playing = false;
+        // The deck we just mixed out of is the natural next thing to
+        // load — clear its now-dead track and select it automatically
+        // (it's the only non-playing deck at this instant, so this is
+        // never fighting a deliberate selection the user just made).
+        const anchorWhich = anchor === slotA ? "A" : "B";
+        clearDeck(anchor, anchorWhich);
+        selectDeck(anchor);
         mixState.phase = "done";
         mixStateEl.textContent = `Done — Deck ${anchor.name} faded out and stopped. Deck ${incoming.name} is now live. Load a fresh record into Deck ${anchor.name} to keep the set going.`;
         mixIn.disabled = false;
