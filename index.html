@@ -598,6 +598,27 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return cue ? midi.header.ticksToSeconds(cue.ticks) : null;
   }
 
+  // Title lives in the file's own Sequence/Track Name slot (the one
+  // semi-standard use of that meta-event); artist has no standard MIDI
+  // field at all, so the companion MIDI Marker Tool writes it as a
+  // plain Text meta-event instead — a convention between the two tools,
+  // not something other MIDI software would expect to find there. Some
+  // real-world files already carry *something* in these same slots from
+  // whatever tool originally generated them (seen in the wild: NUL-byte
+  // padding, and a royalty-free-pack brand watermark masquerading as an
+  // "artist") — strip NUL padding at least; a watermark itself just
+  // reads through as-is, since there's no reliable way to tell it apart
+  // from a real tag at the format level.
+  function cleanMetaText(s) {
+    return (s || "").replace(/\u0000+$/, "").trim();
+  }
+  function extractTitleArtist(midi) {
+    const title = cleanMetaText(midi.header.name);
+    const artistMeta = (midi.header.meta || []).find((m) => m.type === "text" && m.text);
+    const artist = artistMeta ? cleanMetaText(artistMeta.text) : "";
+    return { title, artist };
+  }
+
   function analyzeEntry(midi, name) {
     let bpm = (midi.header.tempos && midi.header.tempos[0] && midi.header.tempos[0].bpm) || 120;
     let duration = midi.duration;
@@ -610,7 +631,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const key = detectKey(info);
     const markers = extractMarkers(midi);
     const gridAnchor = extractGridAnchor(midi);
-    return { id: crypto.randomUUID(), name, midi, bpm, duration, barsData, key, markers, gridAnchor };
+    const { title, artist } = extractTitleArtist(midi);
+    // Falls back to the uploaded filename whenever the file has no
+    // title baked in — true for every file until it's been through the
+    // Marker Tool's new Track Info fields.
+    const displayName = title ? (artist ? `${artist} — ${title}` : title) : name;
+    return { id: crypto.randomUUID(), name: displayName, title, artist, midi, bpm, duration, barsData, key, markers, gridAnchor };
   }
 
   function clampNote(n) {
