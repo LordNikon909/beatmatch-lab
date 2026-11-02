@@ -167,22 +167,6 @@ body {
 .deck-title.empty { color: rgba(255,255,255,0.5); font-style: italic; letter-spacing: normal; }
 @keyframes deckTitleMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
-.filepick {
-  border: 1px dashed #c7c7c7;
-  border-radius: 12px;
-  padding: 10px 12px;
-  margin: 0 10px;
-  font-family: var(--font-ui);
-  font-size: 13px; font-weight: 700;
-  color: var(--text-on-chrome);
-  cursor: pointer;
-  text-align: center;
-  background: transparent;
-  display: block;
-}
-.filepick:hover { border-color: var(--accent-purple); }
-.filepick input { display: none; }
-
 .row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .row label { font-size: 12px; color: var(--fg-dim); min-width: 72px; flex: none; }
 .row input[type="range"] { flex: 1; min-width: 0; }
@@ -258,11 +242,6 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   background: var(--menu-surface); border-radius: 12px;
   padding: 10px; display: flex; flex-direction: column; gap: 10px;
   font-family: var(--font-ui);
-}
-.track-menu-title {
-  font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
-  text-transform: uppercase; color: var(--text-on-chrome);
-  padding: 4px 10px;
 }
 .track-menu-header, .track-menu-row {
   display: flex; align-items: center; gap: 14px;
@@ -475,17 +454,12 @@ button.pause { background: transparent; }
 
 <div class="track-menu-backdrop" id="trackMenuBackdrop" hidden>
   <div class="track-menu">
-    <div class="track-menu-title" id="trackMenuTitle">Load a record</div>
     <div class="track-menu-header">
       <span class="track-menu-col-name">Track Name</span>
       <span class="track-menu-col-key">Key</span>
       <span class="track-menu-col-bpm">BPM</span>
     </div>
     <div class="track-menu-list" id="trackMenuList"></div>
-    <label class="filepick" id="pickBin">
-      + Add MIDI files to the bin&hellip;
-      <input type="file" accept=".mid,.midi" id="binInput" multiple>
-    </label>
     <div class="track-menu-hint">↑ / ↓ select · Enter load · Esc cancel</div>
   </div>
 </div>
@@ -1073,7 +1047,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   // --- DOM refs ---
-  const binInput = document.getElementById("binInput");
   const deckA = document.getElementById("deckA");
   const deckB = document.getElementById("deckB");
   const nameA = document.getElementById("nameA");
@@ -1108,7 +1081,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const phraseCtxB = phraseCanvasB.getContext("2d");
   const crossfaderHandle = document.getElementById("crossfaderHandle");
   const trackMenuBackdrop = document.getElementById("trackMenuBackdrop");
-  const trackMenuTitle = document.getElementById("trackMenuTitle");
   const trackMenuList = document.getElementById("trackMenuList");
   const harmonyBadge = document.getElementById("harmonyBadge");
   const applyTranspose = document.getElementById("applyTranspose");
@@ -1380,23 +1352,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     refreshMixInAvailability();
   }
 
-  binInput.addEventListener("change", async () => {
-    const files = Array.from(binInput.files || []);
-    for (const file of files) {
-      try {
-        const buf = await file.arrayBuffer();
-        const midi = new Midi(buf);
-        const entry = analyzeEntry(midi, file.name);
-        binEntries.push(entry);
-        log(`Added "${file.name}" to the bin — ${entry.bpm.toFixed(1)} BPM, ${entry.key ? entry.key.name + " (" + Math.round(entry.key.score * 100) + "%)" : "no tonal center"}.`);
-      } catch (err) {
-        log(`Could not parse "${file.name}" as MIDI: ${errText(err)}`);
-      }
-    }
-    binInput.value = "";
-    if (menuOpen) renderTrackMenu();
-  });
-
   // One circular button per deck — arms it (starts it playing), once.
   // A playing deck is locked: neither this button nor the Space hotkey
   // can stop it anymore (see the keydown handler) — the only ways a
@@ -1510,15 +1465,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   function openTrackMenu() {
-    // No `binEntries.length` guard — the menu is also the only way to add
-    // files now (via the picker inside it), so it has to be reachable
-    // even on a totally empty bin. Does check `.playing` though: a deck
-    // can still be the selection when it starts playing (selected, then
-    // armed with Space) — its menu has to stay closed once it's locked.
+    // Checks `.playing` though: a deck can still be the selection when it
+    // starts playing (selected, then armed with Space) — its menu has to
+    // stay closed once it's locked.
     if (!selectedDeck || selectedDeck.playing) return;
     menuOpen = true;
     menuHighlightIndex = 0;
-    trackMenuTitle.textContent = `Load a record — Deck ${selectedDeck.name}`;
     renderTrackMenu();
     trackMenuBackdrop.hidden = false;
   }
@@ -1944,7 +1896,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         bundle = await res.json();
         names = Object.keys(bundle);
       } catch (err) {
-        log(`No directory listing and no preload bundle found (${errText(err)}) — add records from the track-select menu instead.`);
+        log(`No directory listing and no preload bundle found (${errText(err)}) — no records to load.`);
         return;
       }
     }
