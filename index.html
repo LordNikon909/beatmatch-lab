@@ -1,41 +1,71 @@
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Beat Match Lab</title>
+<script>
+// Applied before first paint, synchronously, so there's no flash of the
+// wrong theme: a saved manual choice wins, otherwise fall back to the
+// system preference. The actual toggle button (further down) just calls
+// the same setTheme() it defines, once the rest of the page is parsed.
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem("bml-theme"); } catch (e) {}
+  var theme = saved === "light" || saved === "dark"
+    ? saved
+    : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", theme);
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 /* layout: two decks (each its own record-bin menu), a crossfader, and a mix console below */
 :root {
-  --bg: #121016;
-  --panel: #1c1922;
-  --panel-raised: #262230;
-  --fg: #ece8f2;
-  --fg-dim: #9b93a8;
+  /* Design tokens lifted directly from the Framer reference
+     (thoughtful-messages-548606.framer.app) via computed-style
+     inspection — identical in both themes, since the reference itself
+     only has the one (dark) look and these are its fixed brand colors,
+     not page chrome. */
+  --chrome: #f5f5f5;          /* deck/menu "card" surface */
+  --screen: #000000;          /* the black now-playing rect */
+  --menu-surface: #ffffff;    /* track-select menu's own background */
+  --text-on-chrome: #2b2b2b;
+  --text-on-screen: #ffffff;
+  --accent-purple: #aa69ff;   /* key-name pill */
+  --accent-green: #21db94;    /* play/arm button */
+  --accent-coral: #ff787a;    /* small decorative icon glyphs */
+  --font-ui: "Inter", system-ui, sans-serif;
+
+  /* Console tokens (phrase/overlap/harmony/mix-state/log) — same names
+     as before, values now theme-switched below instead of living only
+     in a prefers-color-scheme query. */
   --accent-a: #ff5b7f;
   --accent-b: #4fd6ff;
   --warn: #ffcf5b;
   --ok: #35c47a;
-  --line: #352f3f;
   --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
   --display: "Space Mono", var(--mono);
-  --body: "Inter", system-ui, sans-serif;
+  --body: var(--font-ui);
+
+  /* Dark theme (default) — page background matches the Framer
+     reference's own #2b2b2b exactly; panel/line values are new neutral
+     grays replacing the old purple-tinted ones, to sit cleanly
+     alongside the chrome/accent tokens above. */
+  --bg: #2b2b2b;
+  --panel: #363636;
+  --panel-raised: #454545;
+  --fg: #f0f0f0;
+  --fg-dim: #9a9a9a;
+  --line: #4a4a4a;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #f3f1f6;
-    --panel: #ffffff;
-    --panel-raised: #ebe7f2;
-    --fg: #201c28;
-    --fg-dim: #6b6478;
-    --line: #ddd7e4;
-    color-scheme: light;
-  }
-}
 :root[data-theme="light"] {
-  --bg: #f3f1f6;
+  --bg: #ededed;
   --panel: #ffffff;
-  --panel-raised: #ebe7f2;
-  --fg: #201c28;
-  --fg-dim: #6b6478;
-  --line: #ddd7e4;
+  --panel-raised: #f2f2f2;
+  --fg: #2b2b2b;
+  --fg-dim: #6b6b6b;
+  --line: #dcdcdc;
   color-scheme: light;
 }
 * { box-sizing: border-box; }
@@ -51,82 +81,106 @@ body {
 .decks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 680px) { .decks { grid-template-columns: 1fr; } }
 .deck {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
   min-width: 0;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.deck[data-slot="a"] { border-top: 3px solid var(--accent-a); }
-.deck[data-slot="b"] { border-top: 3px solid var(--accent-b); }
-.deck.selected { border-color: var(--accent-b); box-shadow: 0 0 0 1px var(--accent-b); }
-.marker-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); min-height: 1.2em; }
+.marker-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); min-height: 1.2em; margin-top: 8px; }
 .marker-readout.warn { color: var(--warn); }
 
-/* Deck canvas: the scrolling per-deck piano roll, with play/pill/time/
-   title chrome overlaid on top of it (not drawn into the canvas itself,
-   so it stays crisp text and doesn't need re-measuring on every frame). */
+/* Deck chrome, matched to the Framer reference's own two-piece shape:
+   a pill-bar that only spans its own content width (not the full card),
+   sitting flush on top of a full-width player bar below it — giving the
+   card its distinctive notched silhouette (exposed top-right corner).
+   Both pieces share the same --chrome surface color; only the player's
+   top-left corner stays square, where the pill-bar sits above it. */
+.deck-pillbar {
+  align-self: flex-start;
+  background: var(--chrome);
+  border-radius: 12px 12px 0 0;
+  padding: 10px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 0 0 0 transparent;
+  transition: box-shadow 0.15s ease;
+}
+.deck.selected .deck-pillbar, .deck.selected .deck-player { box-shadow: 0 0 0 2px var(--accent-b); }
+.deck-pill {
+  background: var(--accent-purple); color: #fff;
+  font-family: var(--font-ui); font-size: 13px; font-weight: 700;
+  padding: 7px 15px; border-radius: 30px; white-space: nowrap;
+}
+.deck-bpm { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--text-on-chrome); white-space: nowrap; }
+.deck-player {
+  background: var(--chrome);
+  border-radius: 0 12px 12px 12px;
+  padding: 10px;
+  display: flex;
+  gap: 0;
+  transition: box-shadow 0.15s ease;
+}
+
+/* The play/arm button sits in its own inset area, left of the screen —
+   matching the reference's "Inactive" slot (medium-gray bg, rounded
+   only on the outer/left side). */
+.deck-playarea {
+  flex: none; width: 72px;
+  background: #d9d9d9;
+  border-radius: 6px 0 0 6px;
+  display: flex; align-items: center; justify-content: center;
+}
+.deck-toggle { width: 46px; height: 46px; border: none; background: none; padding: 0; cursor: pointer; }
+.deck-toggle svg { width: 100%; height: 100%; display: block; }
+.deck-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Deck canvas: the scrolling per-deck piano roll, with time/title/live
+   chrome overlaid on top of it (not drawn into the canvas itself, so it
+   stays crisp text and doesn't need re-measuring on every frame). */
 .deck-canvas-wrap {
   position: relative;
+  flex: 1; min-width: 0;
   height: 190px;
-  border-radius: 10px;
+  border-radius: 0 6px 6px 0;
   overflow: hidden;
-  background: #000;
+  background: var(--screen);
   cursor: pointer;
 }
 .deck-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.deck-pill {
-  position: absolute; top: 10px; left: 10px; z-index: 2;
-  display: flex; align-items: center; gap: 6px;
-  background: #aa69ff; color: #19092e;
-  font-family: var(--mono); font-size: 11px; font-weight: 700;
-  padding: 5px 10px; border-radius: 20px;
-  transition: background-color 0.15s ease;
-}
-.deck.selected .deck-pill { background: var(--accent-b); color: #07232b; }
-.deck-pill .sep { opacity: 0.6; }
 .deck-time {
-  position: absolute; top: 10px; right: 10px; z-index: 2;
+  position: absolute; top: 10px; right: 12px; z-index: 2;
   display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
-  font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums;
-  color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  font-family: var(--font-ui); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--text-on-screen);
 }
 .live-badge {
-  position: absolute; right: 12px; bottom: 12px; z-index: 2;
+  position: absolute; left: 12px; top: 10px; z-index: 2;
   font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
-  padding: 2px 6px; border-radius: 4px; background: var(--ok); color: #06241a;
+  padding: 2px 6px; border-radius: 4px; background: var(--accent-green); color: #06241a;
 }
-.deck-toggle {
-  position: absolute; left: 12px; bottom: 12px; z-index: 2;
-  width: 40px; height: 40px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--ok); border: none; color: #06241a; padding: 0;
-}
-.deck-toggle svg { width: 18px; height: 18px; fill: currentColor; }
-.deck-toggle:disabled { opacity: 0.35; cursor: not-allowed; }
-.deck-title {
-  position: absolute; left: 62px; right: 12px; bottom: 12px; z-index: 2;
-  font-size: 13px; font-weight: 600; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.7);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.deck-title.empty { color: rgba(255,255,255,0.6); font-style: italic; }
+/* Track title — a real looping marquee (the reference's own "Brand
+   Ticker" component), not truncated text: the content is duplicated
+   once and the pair scrolls left by exactly one copy's width, forever. */
+.deck-title-wrap { position: absolute; left: 12px; right: 12px; bottom: 10px; z-index: 2; overflow: hidden; }
+.deck-title-track { display: inline-flex; gap: 48px; white-space: nowrap; animation: deckTitleMarquee 14s linear infinite; }
+.deck-title { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--text-on-screen); letter-spacing: 0.02em; }
+.deck-title.empty { color: rgba(255,255,255,0.5); font-style: italic; letter-spacing: normal; }
+@keyframes deckTitleMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
 .filepick {
-  border: 1px dashed var(--line);
-  border-radius: 10px;
+  border: 1px dashed #c7c7c7;
+  border-radius: 12px;
   padding: 10px 12px;
-  font-size: 13px;
-  color: var(--fg-dim);
+  margin: 0 10px;
+  font-family: var(--font-ui);
+  font-size: 13px; font-weight: 700;
+  color: var(--text-on-chrome);
   cursor: pointer;
   text-align: center;
-  background: var(--panel-raised);
+  background: transparent;
   display: block;
 }
-.filepick:hover { border-color: var(--fg-dim); }
+.filepick:hover { border-color: var(--accent-purple); }
 .filepick input { display: none; }
 
 .row { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -166,24 +220,33 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 }
 .console-controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; }
 
-/* Restyled, read-only crossfader — reflects live A/B gain balance,
-   not draggable. Replaces the old twin level-meter bars. */
-.crossfader { display: flex; align-items: center; gap: 14px; }
-.crossfader-label { font-family: var(--display); font-size: 20px; font-weight: 700; }
+/* Restyled, read-only crossfader (the Framer reference's "Mixer") —
+   reflects live A/B gain balance, not draggable. The reference uses
+   plain white here (it has no light theme to worry about); this app
+   does, so track/handle/labels use --fg instead of a literal white —
+   near-white in dark theme (matching the reference almost exactly),
+   dark in light theme, so it's never low-contrast against the page. */
+.crossfader { display: flex; align-items: center; gap: 24px; padding: 8px 0; }
+.crossfader-label { font-family: var(--font-ui); font-size: 36px; font-weight: 700; color: var(--fg); }
 .crossfader-track {
-  position: relative; flex: 1; height: 2px; background: var(--fg); border-radius: 2px;
+  position: relative; flex: 1; height: 7px; background: var(--fg); border-radius: 4px;
   min-width: 0;
 }
 .crossfader-handle {
   position: absolute; top: 50%; left: 50%;
-  width: 6px; height: 22px; border-radius: 3px;
+  width: 7px; height: 36px; border-radius: 4px;
   background: var(--fg); transform: translate(-50%, -50%);
   transition: left 0.08s linear;
 }
 
 /* Keyboard/mouse-driven track-select menu — a centered overlay over
    binEntries/loadBinEntryIntoDeck; the record bin's whole UI now, both
-   browsing/loading a track onto a deck and adding new files to it. */
+   browsing/loading a track onto a deck and adding new files to it.
+   Styling matches the Framer reference's own (DOM-present but
+   collapsed) menu: a white "paper" surface — fixed white/dark-text
+   regardless of theme, like the deck chrome — with a light-chrome
+   header row and the row for whichever track is loaded on either deck
+   visually set apart (chrome background, fully-rounded). */
 .track-menu-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center;
@@ -191,24 +254,51 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 }
 .track-menu-backdrop[hidden] { display: none; }
 .track-menu {
-  width: min(480px, 90vw); max-height: 70vh;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-  padding: 16px; display: flex; flex-direction: column; gap: 10px;
+  width: min(640px, 92vw); max-height: 80vh;
+  background: var(--menu-surface); border-radius: 3px;
+  padding: 10px; display: flex; flex-direction: column; gap: 10px;
+  font-family: var(--font-ui);
 }
 .track-menu-title {
-  font-family: var(--display); font-size: 13px; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--fg-dim);
+  font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-on-chrome);
+  padding: 4px 10px;
 }
-.track-menu-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
-.track-menu-row {
-  padding: 8px 10px; border-radius: 8px; cursor: pointer;
-  display: flex; flex-direction: column; gap: 2px;
+.track-menu-header, .track-menu-row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 20px; border-radius: 12px;
 }
-.track-menu-row .name { font-size: 13.5px; font-weight: 600; }
+.track-menu-header { background: var(--chrome); font-size: 13px; font-weight: 700; color: var(--text-on-chrome); }
+.track-menu-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
+.track-menu-row { cursor: pointer; background: transparent; transition: background-color 0.1s ease; }
+.track-menu-row.highlighted { background: var(--chrome); }
+.track-menu-row.on-deck { border-radius: 43px; background: var(--chrome); }
+.track-menu-row.on-deck.highlighted { box-shadow: inset 0 0 0 2px var(--accent-b); }
+.track-menu-col-name { flex: 1 1 40%; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.track-menu-row .deck-badge {
+  flex: none; width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-green); color: #06241a; font-size: 12px; font-weight: 700;
+}
+.track-menu-row .name-block { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.track-menu-row .name { font-size: 13.5px; font-weight: 700; color: var(--text-on-chrome); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-menu-row .meta { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
-.track-menu-row.highlighted { background: var(--accent-b); }
-.track-menu-row.highlighted .name, .track-menu-row.highlighted .meta { color: #07232b; }
-.track-menu-hint { font-size: 11.5px; color: var(--fg-dim); }
+.track-menu-col-key { flex: 0 0 112px; }
+.track-menu-row .key-pill {
+  display: inline-block; background: var(--accent-purple); color: #fff;
+  font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 30px; white-space: nowrap;
+}
+.track-menu-col-bpm { flex: 0 0 70px; text-align: right; font-size: 13px; font-weight: 700; color: var(--text-on-chrome); }
+.track-menu-hint { font-size: 11.5px; color: var(--fg-dim); padding: 0 10px; }
+
+.theme-toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 40;
+  width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel-raised); border: 1px solid var(--line); color: var(--fg);
+  cursor: pointer; padding: 0;
+}
+.theme-toggle svg { width: 18px; height: 18px; fill: currentColor; }
 
 .pause-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);
@@ -252,48 +342,80 @@ button.pause { background: transparent; }
 .hint { font-size: 12px; color: var(--fg-dim); line-height: 1.5; }
 </style>
 
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle dark/light theme">
+  <svg viewBox="0 0 24 24"><path id="themeToggleIcon"></path></svg>
+</button>
+
 <div class="wrap">
   <div class="crossfader">
-    <span class="crossfader-label" style="color: var(--accent-a)">A</span>
+    <span class="crossfader-label">A</span>
     <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
-    <span class="crossfader-label" style="color: var(--accent-b)">B</span>
+    <span class="crossfader-label">B</span>
   </div>
 
   <div class="decks">
     <div class="deck" data-slot="a" id="deckA">
-      <div class="deck-canvas-wrap" id="deckCanvasWrapA">
-        <canvas id="phraseCanvasA"></canvas>
-        <div class="deck-pill" id="pillA">
-          <span id="pillKeyA">—</span><span class="sep">·</span><span id="pillBpmA">— BPM</span>
+      <div class="deck-pillbar">
+        <span class="deck-pill" id="pillA"><span id="pillKeyA">—</span></span>
+        <span class="deck-bpm" id="pillBpmA">— BPM</span>
+      </div>
+      <div class="deck-player">
+        <div class="deck-playarea">
+          <button class="deck-toggle" id="toggleA" disabled aria-label="Arm Deck A">
+            <svg viewBox="0 0 59 59">
+              <circle cx="29.5" cy="29.5" r="29.5" fill="var(--chrome)"></circle>
+              <circle cx="29.5" cy="29.5" r="25.5" fill="var(--accent-green)"></circle>
+              <path id="toggleIconA" fill="var(--chrome)" d="M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.715 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.05 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 44.94 34.04 C 46.53 33.06 47.48 31.37 47.48 29.5 C 47.48 27.63 46.53 25.94 44.94 24.96 Z M 43.8 29.5 C 43.8 30.09 43.51 30.6 43.01 30.9 L 23.71 42.75 C 23.19 43.07 22.57 43.08 22.04 42.79 C 21.51 42.49 21.2 41.96 21.2 41.35 L 21.2 17.65 C 21.198 17.212 21.372 16.791 21.682 16.482 C 21.991 16.172 22.412 15.998 22.85 16 C 23.15 16 23.45 16.09 23.71 16.25 L 43.01 28.1 C 43.51 28.41 43.8 28.92 43.8 29.5 Z"></path>
+            </svg>
+          </button>
         </div>
-        <span class="live-badge" id="liveBadgeA" hidden>LIVE</span>
-        <button class="deck-toggle" id="toggleA" disabled aria-label="Play or stop Deck A">
-          <svg id="toggleIconA" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
-        </button>
-        <div class="deck-time">
-          <span id="timeRemainingA">−0:00</span>
-          <span id="timeElapsedA">+0:00</span>
+        <div class="deck-canvas-wrap" id="deckCanvasWrapA">
+          <canvas id="phraseCanvasA"></canvas>
+          <span class="live-badge" id="liveBadgeA" hidden>LIVE</span>
+          <div class="deck-time">
+            <span id="timeRemainingA">−0:00</span>
+            <span id="timeElapsedA">+0:00</span>
+          </div>
+          <div class="deck-title-wrap">
+            <div class="deck-title-track">
+              <span class="deck-title empty" id="nameA">No record loaded</span>
+              <span class="deck-title empty" id="nameA2" aria-hidden="true">No record loaded</span>
+            </div>
+          </div>
         </div>
-        <div class="deck-title empty" id="nameA">No record loaded</div>
       </div>
       <div class="marker-readout" id="markerA"></div>
     </div>
 
     <div class="deck" data-slot="b" id="deckB">
-      <div class="deck-canvas-wrap" id="deckCanvasWrapB">
-        <canvas id="phraseCanvasB"></canvas>
-        <div class="deck-pill" id="pillB">
-          <span id="pillKeyB">—</span><span class="sep">·</span><span id="pillBpmB">— BPM</span>
+      <div class="deck-pillbar">
+        <span class="deck-pill" id="pillB"><span id="pillKeyB">—</span></span>
+        <span class="deck-bpm" id="pillBpmB">— BPM</span>
+      </div>
+      <div class="deck-player">
+        <div class="deck-playarea">
+          <button class="deck-toggle" id="toggleB" disabled aria-label="Arm Deck B">
+            <svg viewBox="0 0 59 59">
+              <circle cx="29.5" cy="29.5" r="29.5" fill="var(--chrome)"></circle>
+              <circle cx="29.5" cy="29.5" r="25.5" fill="var(--accent-green)"></circle>
+              <path id="toggleIconB" fill="var(--chrome)" d="M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.715 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.05 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 44.94 34.04 C 46.53 33.06 47.48 31.37 47.48 29.5 C 47.48 27.63 46.53 25.94 44.94 24.96 Z M 43.8 29.5 C 43.8 30.09 43.51 30.6 43.01 30.9 L 23.71 42.75 C 23.19 43.07 22.57 43.08 22.04 42.79 C 21.51 42.49 21.2 41.96 21.2 41.35 L 21.2 17.65 C 21.198 17.212 21.372 16.791 21.682 16.482 C 21.991 16.172 22.412 15.998 22.85 16 C 23.15 16 23.45 16.09 23.71 16.25 L 43.01 28.1 C 43.51 28.41 43.8 28.92 43.8 29.5 Z"></path>
+            </svg>
+          </button>
         </div>
-        <span class="live-badge" id="liveBadgeB" hidden>LIVE</span>
-        <button class="deck-toggle" id="toggleB" disabled aria-label="Play or stop Deck B">
-          <svg id="toggleIconB" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
-        </button>
-        <div class="deck-time">
-          <span id="timeRemainingB">−0:00</span>
-          <span id="timeElapsedB">+0:00</span>
+        <div class="deck-canvas-wrap" id="deckCanvasWrapB">
+          <canvas id="phraseCanvasB"></canvas>
+          <span class="live-badge" id="liveBadgeB" hidden>LIVE</span>
+          <div class="deck-time">
+            <span id="timeRemainingB">−0:00</span>
+            <span id="timeElapsedB">+0:00</span>
+          </div>
+          <div class="deck-title-wrap">
+            <div class="deck-title-track">
+              <span class="deck-title empty" id="nameB">No record loaded</span>
+              <span class="deck-title empty" id="nameB2" aria-hidden="true">No record loaded</span>
+            </div>
+          </div>
         </div>
-        <div class="deck-title empty" id="nameB">No record loaded</div>
       </div>
       <div class="marker-readout" id="markerB"></div>
     </div>
@@ -354,6 +476,11 @@ button.pause { background: transparent; }
 <div class="track-menu-backdrop" id="trackMenuBackdrop" hidden>
   <div class="track-menu">
     <div class="track-menu-title" id="trackMenuTitle">Load a record</div>
+    <div class="track-menu-header">
+      <span class="track-menu-col-name">Track Name</span>
+      <span class="track-menu-col-key">Key</span>
+      <span class="track-menu-col-bpm">BPM</span>
+    </div>
     <div class="track-menu-list" id="trackMenuList"></div>
     <label class="filepick" id="pickBin">
       + Add MIDI files to the bin&hellip;
@@ -925,6 +1052,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const deckB = document.getElementById("deckB");
   const nameA = document.getElementById("nameA");
   const nameB = document.getElementById("nameB");
+  const nameA2 = document.getElementById("nameA2");
+  const nameB2 = document.getElementById("nameB2");
   const pillKeyA = document.getElementById("pillKeyA");
   const pillKeyB = document.getElementById("pillKeyB");
   const pillBpmA = document.getElementById("pillBpmA");
@@ -962,6 +1091,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const stopAllBtn = document.getElementById("stopAll");
   const pauseBtn = document.getElementById("pauseBtn");
   const pauseOverlay = document.getElementById("pauseOverlay");
+  const themeToggle = document.getElementById("themeToggle");
+  const themeToggleIcon = document.getElementById("themeToggleIcon");
 
   const mixState = { phase: "idle", nextPhrase: 0, overlapSec: 0, anchor: null, incoming: null };
 
@@ -1148,6 +1279,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // load rather than showing a dead, no-longer-playing track.
   function clearDeck(slot, which) {
     const nameEl = which === "A" ? nameA : nameB;
+    const nameEl2 = which === "A" ? nameA2 : nameB2;
     const pillKeyEl = which === "A" ? pillKeyA : pillKeyB;
     const pillBpmEl = which === "A" ? pillBpmA : pillBpmB;
     const markerEl = which === "A" ? markerA : markerB;
@@ -1165,6 +1297,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
     nameEl.textContent = "No record loaded";
     nameEl.classList.add("empty");
+    nameEl2.textContent = "No record loaded";
+    nameEl2.classList.add("empty");
     pillKeyEl.textContent = "—";
     pillBpmEl.textContent = "— BPM";
     markerEl.textContent = "";
@@ -1178,6 +1312,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const slot = which === "A" ? slotA : slotB;
     if (slot.playing || mixState.phase === "armed" || mixState.phase === "crossfading") return;
     const nameEl = which === "A" ? nameA : nameB;
+    const nameEl2 = which === "A" ? nameA2 : nameB2;
     const pillKeyEl = which === "A" ? pillKeyA : pillKeyB;
     const pillBpmEl = which === "A" ? pillBpmA : pillBpmB;
     const markerEl = which === "A" ? markerA : markerB;
@@ -1202,6 +1337,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     await buildParts(slot);
     nameEl.textContent = entry.name;
     nameEl.classList.remove("empty");
+    nameEl2.textContent = entry.name;
+    nameEl2.classList.remove("empty");
     pillKeyEl.textContent = slot.key ? slot.key.name : "—";
     pillBpmEl.textContent = `${slot.bpm.toFixed(1)} BPM`;
     const anchorText = slot.gridAnchor != null ? `grid anchor at ${formatClock(slot.gridAnchor)}` : "no grid anchor (bar 1 = file start)";
@@ -1239,10 +1376,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // can stop it anymore (see the keydown handler) — the only ways a
   // live deck goes quiet now are the Beatmatch Mix fading it out
   // automatically, Stop All, or Pause freezing everything in place.
-  const PLAY_ICON = '<path d="M8 5v14l11-7z"></path>';
-  const STOP_ICON = '<path d="M6 6h12v12H6z"></path>';
+  // The play-triangle path is the Framer reference's own icon, read
+  // directly from its SVG; the stop-square is new (there's no "playing"
+  // variant to read in the reference), built in the same 59x59 space.
+  const PLAY_PATH = "M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.715 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.05 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 44.94 34.04 C 46.53 33.06 47.48 31.37 47.48 29.5 C 47.48 27.63 46.53 25.94 44.94 24.96 Z M 43.8 29.5 C 43.8 30.09 43.51 30.6 43.01 30.9 L 23.71 42.75 C 23.19 43.07 22.57 43.08 22.04 42.79 C 21.51 42.49 21.2 41.96 21.2 41.35 L 21.2 17.65 C 21.198 17.212 21.372 16.791 21.682 16.482 C 21.991 16.172 22.412 15.998 22.85 16 C 23.15 16 23.45 16.09 23.71 16.25 L 43.01 28.1 C 43.51 28.41 43.8 28.92 43.8 29.5 Z";
+  const STOP_PATH = "M 20 20 H 39 V 39 H 20 Z";
   function setToggleIcon(iconEl, playing) {
-    iconEl.innerHTML = playing ? STOP_ICON : PLAY_ICON;
+    iconEl.setAttribute("d", playing ? STOP_PATH : PLAY_PATH);
   }
 
   async function armDeck(slot, which) {
@@ -1300,16 +1440,44 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       return;
     }
     binEntries.forEach((entry, i) => {
+      const onDeck = slotA.binId === entry.id ? "A" : slotB.binId === entry.id ? "B" : null;
       const row = document.createElement("div");
-      row.className = "track-menu-row" + (i === menuHighlightIndex ? " highlighted" : "");
+      row.className = "track-menu-row"
+        + (i === menuHighlightIndex ? " highlighted" : "")
+        + (onDeck ? " on-deck" : "");
+
+      const colName = document.createElement("div");
+      colName.className = "track-menu-col-name";
+      if (onDeck) {
+        const badge = document.createElement("span");
+        badge.className = "deck-badge";
+        badge.textContent = onDeck;
+        colName.appendChild(badge);
+      }
+      const nameBlock = document.createElement("div");
+      nameBlock.className = "name-block";
       const name = document.createElement("div");
       name.className = "name";
       name.textContent = entry.name;
       const meta = document.createElement("div");
       meta.className = "meta";
       const markerCount = entry.markers ? entry.markers.length : 0;
-      meta.textContent = `${entry.bpm.toFixed(1)} bpm · ${entry.key ? entry.key.name : "no tonal center"} · ${entry.gridAnchor != null ? "anchored" : "no anchor"} · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
-      row.append(name, meta);
+      meta.textContent = `${entry.gridAnchor != null ? "anchored" : "no anchor"} · ${markerCount} marker${markerCount === 1 ? "" : "s"}`;
+      nameBlock.append(name, meta);
+      colName.appendChild(nameBlock);
+
+      const colKey = document.createElement("div");
+      colKey.className = "track-menu-col-key";
+      const keyPill = document.createElement("span");
+      keyPill.className = "key-pill";
+      keyPill.textContent = entry.key ? entry.key.name : "—";
+      colKey.appendChild(keyPill);
+
+      const colBpm = document.createElement("div");
+      colBpm.className = "track-menu-col-bpm";
+      colBpm.textContent = entry.bpm.toFixed(1);
+
+      row.append(colName, colKey, colBpm);
       row.addEventListener("click", () => { menuHighlightIndex = i; confirmMenuSelection(); });
       trackMenuList.appendChild(row);
     });
@@ -1379,6 +1547,26 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
   pauseBtn.addEventListener("click", () => togglePause());
   pauseOverlay.addEventListener("click", () => togglePause());
+
+  // Theme toggle — the actual data-theme attribute is already set
+  // before first paint by the inline script up in <head> (reads
+  // localStorage, falls back to the system preference), so this just
+  // has to sync the icon to whatever that landed on and handle clicks.
+  const SUN_PATH = "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1Zm0 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1ZM3 11a1 1 0 0 1 1 1 1 1 0 0 1-1 1H1a1 1 0 1 1 0-2h2Zm20 0a1 1 0 0 1 1 1 1 1 0 0 1-1 1h-2a1 1 0 1 1 0-2h2ZM5.64 4.22a1 1 0 0 1 1.41 0l1.41 1.41a1 1 0 1 1-1.41 1.41L5.64 5.64a1 1 0 0 1 0-1.42Zm12.73 12.73a1 1 0 0 1 1.41 0l1.41 1.41a1 1 0 1 1-1.41 1.41l-1.41-1.41a1 1 0 0 1 0-1.41ZM18.36 4.22a1 1 0 0 1 1.41 1.41l-1.41 1.42a1 1 0 1 1-1.42-1.42l1.42-1.41ZM5.64 17.07a1 1 0 0 1 1.41 1.41l-1.41 1.41a1 1 0 1 1-1.41-1.41l1.41-1.41Z";
+  const MOON_PATH = "M12.3 3a9 9 0 1 0 8.7 8.7 7.5 7.5 0 0 1-8.7-8.7Z";
+  function applyThemeIcon(theme) {
+    themeToggleIcon.setAttribute("d", theme === "dark" ? MOON_PATH : SUN_PATH);
+  }
+  function setTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("bml-theme", theme); } catch (e) {}
+    applyThemeIcon(theme);
+  }
+  applyThemeIcon(document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
+  themeToggle.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    setTheme(current === "dark" ? "light" : "dark");
+  });
 
   window.addEventListener("keydown", (e) => {
     const tag = document.activeElement && document.activeElement.tagName;
