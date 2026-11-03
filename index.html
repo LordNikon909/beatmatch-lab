@@ -78,12 +78,21 @@ body {
   padding-block: 20px 48px;
 }
 .wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
-.decks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.decks { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 680px) { .decks { grid-template-columns: 1fr; } }
 .deck {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+#deckB .deck-pillbar{
+  align-self: flex-end;
+}
+/* Mirrors .deck-player's corners too — the pillbar now sits flush
+   against the RIGHT edge, so the square corner (where the two pieces
+   meet) needs to move from top-left to top-right to match. */
+#deckB .deck-player {
+  border-radius: 12px 0 12px 12px;
 }
 .marker-readout { font-family: var(--mono); font-size: 12.5px; color: var(--fg-dim); min-height: 1.2em; margin-top: 8px; }
 .marker-readout.warn { color: var(--warn); }
@@ -107,11 +116,11 @@ body {
 }
 .deck.selected .deck-pillbar, .deck.selected .deck-player { background: var(--accent-b); }
 .deck-pill {
-  background: var(--accent-purple); color: #fff;
-  font-family: var(--font-ui); font-size: 13px; font-weight: 700;
+  background: #2B2B2B; color: #fff;
+  font-family: var(--font-ui); font-size: 16px; font-weight: 700;
   padding: 7px 15px; border-radius: 30px; white-space: nowrap;
 }
-.deck-bpm { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--text-on-chrome); white-space: nowrap; }
+.deck-bpm { font-family: var(--font-ui); font-size: 16px; font-weight: 700; color: var(--text-on-chrome); white-space: nowrap; }
 .deck-player {
   background: var(--chrome);
   border-radius: 0 12px 12px 12px;
@@ -125,14 +134,15 @@ body {
    matching the reference's "Inactive" slot (medium-gray bg, rounded
    only on the outer/left side). */
 .deck-playarea {
-  flex: none; width: 72px;
+  flex: none; width: 95px;
   background: #d9d9d9;
+  border-right: solid var(--chrome) 6px;
   border-radius: 6px 0 0 6px;
   display: flex; align-items: center; justify-content: center;
 }
-.deck-toggle { width: 46px; height: 46px; border: none; background: none; padding: 0; cursor: pointer; }
+.deck-toggle { width: 60px; height: 60px; border: none; background: none; padding: 0; cursor: pointer; }
 .deck-toggle svg { width: 100%; height: 100%; display: block; }
-.deck-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
+.deck-toggle:disabled { opacity: 1; cursor: not-allowed; }
 
 /* Deck canvas: the scrolling per-deck piano roll, with time/title/live
    chrome overlaid on top of it (not drawn into the canvas itself, so it
@@ -140,7 +150,7 @@ body {
 .deck-canvas-wrap {
   position: relative;
   flex: 1; min-width: 0;
-  height: 190px;
+  height: 160px;
   border-radius: 0 6px 6px 0;
   overflow: hidden;
   background: var(--screen);
@@ -150,7 +160,7 @@ body {
 .deck-time {
   position: absolute; top: 10px; right: 12px; z-index: 2;
   display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
-  font-family: var(--font-ui); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  font-family: var(--font-ui); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;
   color: var(--text-on-screen);
 }
 .live-badge {
@@ -160,10 +170,16 @@ body {
 }
 /* Track title — a real looping marquee (the reference's own "Brand
    Ticker" component), not truncated text: the content is duplicated
-   once and the pair scrolls left by exactly one copy's width, forever. */
+   once and the pair scrolls left by exactly one copy's width, forever.
+   The 48px gap lives on each span's own padding-right (a self-contained
+   repeating unit), not as a flex `gap` between them — a flex `gap`
+   only applies BETWEEN items, never after the last one, so the two
+   copies-plus-gap total isn't evenly splittable in half and the 50%
+   keyframe lands mid-gap instead of exactly at the second copy's
+   start, which reads as the marquee skipping back early. */
 .deck-title-wrap { position: absolute; left: 12px; right: 12px; bottom: 10px; z-index: 2; overflow: hidden; }
-.deck-title-track { display: inline-flex; gap: 48px; white-space: nowrap; animation: deckTitleMarquee 14s linear infinite; }
-.deck-title { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--text-on-screen); letter-spacing: 0.02em; }
+.deck-title-track { display: inline-flex; white-space: nowrap; animation: deckTitleMarquee 14s linear infinite; }
+.deck-title { font-family: var(--font-ui); font-size: 20px; font-weight: 700; color: var(--text-on-screen); letter-spacing: 0.02em; padding-right: 48px; }
 .deck-title.empty { color: rgba(255,255,255,0.5); font-style: italic; letter-spacing: normal; }
 @keyframes deckTitleMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
@@ -210,7 +226,14 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
    does, so track/handle/labels use --fg instead of a literal white —
    near-white in dark theme (matching the reference almost exactly),
    dark in light theme, so it's never low-contrast against the page. */
-.crossfader { display: flex; align-items: center; gap: 24px; padding: 8px 0; }
+.crossfader {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  height: 55px; width: min(480px, calc(100% - 400px));
+  z-index: 3; display: flex; align-items: center; justify-content: center; gap: 24px;
+}
+@media (max-width: 680px) {
+  .crossfader { position: static; transform: none; height: auto; width: auto; margin-bottom: 14px; padding: 8px 0; }
+}
 .crossfader-label { font-family: var(--font-ui); font-size: 36px; font-weight: 700; color: var(--fg); }
 .crossfader-track {
   position: relative; flex: 1; height: 7px; background: var(--fg); border-radius: 4px;
@@ -247,7 +270,7 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   display: flex; align-items: center; gap: 14px;
   padding: 10px 20px; border-radius: 12px;
 }
-.track-menu-header { background: var(--chrome); font-size: 13px; font-weight: 700; color: var(--text-on-chrome); }
+.track-menu-header { background: var(--chrome); font-size: 16px; font-weight: 700; color: var(--text-on-chrome); }
 .track-menu-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
 .track-menu-row { cursor: pointer; background: transparent; transition: background-color 0.1s ease; }
 .track-menu-row.highlighted { background: var(--accent-b); }
@@ -325,17 +348,19 @@ button.pause { background: transparent; }
 </button>
 
 <div class="wrap">
-  <div class="crossfader">
-    <span class="crossfader-label">A</span>
-    <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
-    <span class="crossfader-label">B</span>
-  </div>
+  <div class="log" id="log"></div>
 
   <div class="decks">
+    <div class="crossfader">
+      <span class="crossfader-label">A</span>
+      <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
+      <span class="crossfader-label">B</span>
+    </div>
+
     <div class="deck" data-slot="a" id="deckA">
       <div class="deck-pillbar">
-        <span class="deck-pill" id="pillA"><span id="pillKeyA">—</span></span>
-        <span class="deck-bpm" id="pillBpmA">— BPM</span>
+        <span class="deck-pill" id="pillA"><span id="pillKeyA">🎹--</span></span>
+        <span class="deck-bpm" id="pillBpmA">❤️--.- BPM</span>
       </div>
       <div class="deck-player">
         <div class="deck-playarea">
@@ -367,8 +392,8 @@ button.pause { background: transparent; }
 
     <div class="deck" data-slot="b" id="deckB">
       <div class="deck-pillbar">
-        <span class="deck-pill" id="pillB"><span id="pillKeyB">—</span></span>
-        <span class="deck-bpm" id="pillBpmB">— BPM</span>
+        <span class="deck-pill" id="pillB"><span id="pillKeyB">🎹--</span></span>
+        <span class="deck-bpm" id="pillBpmB">❤️--.- BPM</span>
       </div>
       <div class="deck-player">
         <div class="deck-playarea">
@@ -404,8 +429,9 @@ button.pause { background: transparent; }
       <div class="row">
         <label for="phraseLenSel">Phrase length</label>
         <select id="phraseLenSel">
+          <option value="1" selected>1 bar</option>
           <option value="2">2 bars</option>
-          <option value="4" selected>4 bars</option>
+          <option value="4">4 bars</option>
           <option value="8">8 bars</option>
           <option value="16">16 bars</option>
         </select>
@@ -415,10 +441,10 @@ button.pause { background: transparent; }
         <select id="overlapLenSel">
           <option value="1">1 bar</option>
           <option value="2">2 bars</option>
-          <option value="4" selected>4 bars</option>
+          <option value="4">4 bars</option>
           <option value="8">8 bars</option>
           <option value="16">16 bars</option>
-          <option value="32">32 bars</option>
+          <option value="32" selected>32 bars</option>
         </select>
       </div>
       <div class="row">
@@ -446,8 +472,6 @@ button.pause { background: transparent; }
       <button class="pause" id="pauseBtn">Pause</button>
       <button class="stopall" id="stopAll">Stop All</button>
     </div>
-    <p class="hint">Beatmatch Mix always mixes whichever deck is loaded-but-silent into whichever deck is currently live — if both or neither are playing, it stays disabled until exactly one is. Phrasing is automatic: it triggers at the next multiple of the selected phrase length, counted from the anchor's grid anchor if it has one (set via the companion MIDI Marker Tool), or from the file's own start otherwise. Assumes 4/4 time and that a record's own MIDI start is its downbeat unless a grid anchor says otherwise. Phrase-length auto-suggestion is a self-similarity heuristic, not verified song structure. Key detection correlates a duration-weighted pitch-class histogram against the 24 major/minor key profiles (Krumhansl-Schmuckler) over the whole record — solid for one stable key, blind to mid-song key changes, unreliable on drum-only or heavily chromatic material. Every channel — melodic tracks on their own declared GM instrument, percussion on the GM drum kit — plays through a real SoundFont2 synthesizer (SpessaSynth), so drop in a different .sf2 to change the whole instrument palette.</p>
-    <div class="log" id="log"></div>
   </div>
 </div>
 
@@ -567,55 +591,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       bars[idx].hist[((n.midi % 12) + 12) % 12]++;
     });
     return { barLen, totalBars, bars };
-  }
-
-  function cosineDist(a, b) {
-    let dot = 0, na = 0, nb = 0;
-    for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-    if (na === 0 || nb === 0) return null;
-    return 1 - dot / (Math.sqrt(na) * Math.sqrt(nb));
-  }
-
-  function phraseBoundaries(barsData, phraseLen) {
-    const { bars, totalBars, barLen } = barsData;
-    const out = [];
-    const sum = (arr) => arr.reduce((acc, b) => {
-      acc.count += b.count;
-      for (let i = 0; i < 12; i++) acc.hist[i] += b.hist[i];
-      return acc;
-    }, { count: 0, hist: new Array(12).fill(0) });
-    for (let k = phraseLen; k < totalBars; k += phraseLen) {
-      const prevBars = bars.slice(Math.max(0, k - phraseLen), k);
-      const nextBars = bars.slice(k, Math.min(totalBars, k + phraseLen));
-      if (!prevBars.length || !nextBars.length) continue;
-      const p = sum(prevBars), n = sum(nextBars);
-      const densP = p.count / prevBars.length, densN = n.count / nextBars.length;
-      const densDelta = Math.abs(densP - densN) / (densP + densN + 1e-6);
-      const pitchDist = cosineDist(p.hist, n.hist);
-      const score = pitchDist === null ? densDelta : (0.7 * pitchDist + 0.3 * densDelta);
-      out.push({ bar: k, time: k * barLen, score });
-    }
-    return out;
-  }
-
-  // Auto-suggests a sensible phrase length when a deck becomes live —
-  // the one piece of the old self-similarity heuristic kept around;
-  // the boundary-strength visualization it used to drive is superseded
-  // by seeing the deck's actual notes on the piano roll instead.
-  function suggestPhraseLength(barsData) {
-    const candidates = [4, 8, 16];
-    let best = null;
-    candidates.forEach((L) => {
-      if (barsData.totalBars < 2 * L) return;
-      const b = phraseBoundaries(barsData, L);
-      if (!b.length) return;
-      const scores = b.map((x) => x.score).sort((a, c) => a - c);
-      const max = scores[scores.length - 1];
-      const median = scores[Math.floor(scores.length / 2)];
-      const contrast = max - median;
-      if (!best || contrast > best.contrast) best = { L, contrast, max };
-    });
-    return best ? best.L : 4;
   }
 
   // --- key detection (Krumhansl-Schmuckler: correlate a duration-weighted
@@ -931,6 +906,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const synth = new WorkletSynthesizer(nativeCtx);
     synth.connect(gain);
     gain.connect(masterCompressor);
+    gain.connect(reverbSend);
+    gain.connect(chorusSend);
 
     return {
       name, gain, synth,
@@ -966,11 +943,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     };
   }
 
-  // A cheap limiter so both decks playing together near full volume
-  // doesn't clip. (No reverb send here, unlike the previous version —
-  // Tone.Reverb lives on Tone's own context and can't take native input
-  // from nativeCtx; a native ConvolverNode-based reverb could replace
-  // this later if the dry sound needs it.)
+  // A cheap limiter so both decks (plus the reverb/chorus sends below)
+  // playing together near full volume doesn't clip.
   const masterCompressor = nativeCtx.createDynamicsCompressor();
   masterCompressor.threshold.value = -6;
   masterCompressor.knee.value = 0;
@@ -978,6 +952,52 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   masterCompressor.attack.value = 0.001;
   masterCompressor.release.value = 0.1;
   masterCompressor.connect(nativeCtx.destination);
+
+  // Reverb + chorus, as parallel sends on top of the dry signal (same
+  // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
+  // alone reads thin and clinical; a touch of room glue plus gentle
+  // pitch-modulated doubling is most of what makes it sound "fuller"
+  // and more like a produced track. Both run entirely on nativeCtx, so
+  // (unlike the old Tone.Reverb, which lived on Tone's own context and
+  // couldn't take native input) no cross-context bridging is needed.
+  //
+  // Reverb: a ConvolverNode needs an impulse response. Rather than fetch
+  // one, synthesize a plate-ish tail client-side — exponentially-decaying
+  // white noise is the standard no-asset way to drive a ConvolverNode.
+  function makeReverbImpulse(ctx, durationSec = 2.2, decay = 2.5) {
+    const length = Math.round(ctx.sampleRate * durationSec);
+    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+      }
+    }
+    return impulse;
+  }
+  const reverbSend = nativeCtx.createGain();
+  reverbSend.gain.value = 0.33; // matches chiptune.app's own default
+  const reverbNode = nativeCtx.createConvolver();
+  reverbNode.buffer = makeReverbImpulse(nativeCtx);
+  reverbSend.connect(reverbNode);
+  reverbNode.connect(masterCompressor);
+
+  // Chorus: a short delay line whose time is slowly LFO-modulated, mixed
+  // back in alongside the dry signal — classic doubling/thickening,
+  // again no external assets needed.
+  const chorusSend = nativeCtx.createGain();
+  chorusSend.gain.value = 0.5; // matches chiptune.app's own default
+  const chorusDelay = nativeCtx.createDelay(0.05);
+  chorusDelay.delayTime.value = 0.02;
+  const chorusLFO = nativeCtx.createOscillator();
+  chorusLFO.frequency.value = 0.8;
+  const chorusLFODepth = nativeCtx.createGain();
+  chorusLFODepth.gain.value = 0.004;
+  chorusLFO.connect(chorusLFODepth);
+  chorusLFODepth.connect(chorusDelay.delayTime);
+  chorusLFO.start();
+  chorusSend.connect(chorusDelay);
+  chorusDelay.connect(masterCompressor);
 
   // Constructing a WorkletSynthesizer needs the processor module already
   // registered on this AudioContext, and loading a soundfont is async —
@@ -1122,21 +1142,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     mixIn.disabled = !(roles && roles.incoming.midi);
   }
 
-  function liveSlotForDisplay() {
-    if (mixState.phase === "armed" || mixState.phase === "crossfading") return mixState.anchor;
-    const roles = getAnchorIncoming();
-    return roles ? roles.anchor : null;
-  }
-
   function updateLiveBadges() {
     liveBadgeA.hidden = !slotA.playing;
     liveBadgeB.hidden = !slotB.playing;
-  }
-
-  function updateLiveFocus() {
-    updateLiveBadges();
-    const target = liveSlotForDisplay();
-    if (target && target.barsData) phraseLenSel.value = String(suggestPhraseLength(target.barsData));
   }
 
   function resizeDeckCanvas(canvas, ctx) {
@@ -1368,7 +1376,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     log(`Loaded "${entry.name}" onto Deck ${which} — ${slot.bpm.toFixed(1)} BPM, ${slot.key ? slot.key.name : "no tonal center"}.`);
 
     updateHarmony();
-    updateLiveFocus();
+    updateLiveBadges();
     refreshMixInAvailability();
   }
 
@@ -1394,7 +1402,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     playSlot(slot, volSlider.value);
     log(`Deck ${which} playing.`);
     setToggleIcon(toggleIconEl, slot.playing);
-    updateLiveFocus();
+    updateLiveBadges();
     refreshMixInAvailability();
   }
 
@@ -1705,7 +1713,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     mixState.incoming = incoming;
     mixState.nextPhrase = nextPhrase;
     mixState.overlapSec = overlapSec;
-    updateLiveFocus();
+    updateLiveBadges();
 
     const barNum = Math.round(nextPhraseElapsedSinceAnchor / barLen) + 1;
     const entryDesc = incomingFromTime > 0 ? `its grid anchor (skipping its first ${incomingFromTime.toFixed(1)}s)` : "its own downbeat";
@@ -1726,7 +1734,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         mixState.phase = "done";
         mixStateEl.textContent = `Done — Deck ${anchor.name} faded out and stopped. Deck ${incoming.name} is now live. Load a fresh record into Deck ${anchor.name} to keep the set going.`;
         mixIn.disabled = false;
-        updateLiveFocus();
+        updateLiveBadges();
         refreshMixInAvailability();
         log(`Crossfade complete. Deck ${anchor.name} stopped; Deck ${incoming.name} continues solo.`);
       } catch (err) {
@@ -1752,7 +1760,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     mixState.anchor = null;
     mixState.incoming = null;
     mixStateEl.textContent = "Idle. Arm a deck to start the set, load a record into the other deck, then trigger Beatmatch Mix.";
-    updateLiveFocus();
+    updateLiveBadges();
     refreshMixInAvailability();
     log("Stopped all decks.");
   });
@@ -1939,6 +1947,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   log("Ready. Select a deck and press Enter to open its record bin, load a track and press Space to go live, then load another into the other deck and press Space again to Beatmatch Mix.");
   try {
     await initAudioEngine();
+    selectDeck(slotA);
     await preloadBin();
   } catch (err) {
     log(`Fatal: couldn't start the audio engine: ${errText(err)}`);
