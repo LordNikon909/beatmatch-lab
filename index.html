@@ -139,7 +139,13 @@ body {
   border-right: solid var(--chrome) 6px;
   border-radius: 6px 0 0 6px;
   display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s ease;
 }
+/* While a deck is playing (locked), its playarea glows the same green
+   as the arm button normally does — the button itself switches to the
+   muted/locked icon instead (see setToggleIcon), so the "live" signal
+   moves to the surrounding slot rather than disappearing. */
+.deck-playarea.live { background: var(--accent-green); }
 .deck-toggle { width: 60px; height: 60px; border: none; background: none; padding: 0; cursor: pointer; }
 .deck-toggle svg { width: 100%; height: 100%; display: block; }
 .deck-toggle:disabled { opacity: 1; cursor: not-allowed; }
@@ -227,14 +233,25 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
    near-white in dark theme (matching the reference almost exactly),
    dark in light theme, so it's never low-contrast against the page. */
 .crossfader {
-  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  height: 55px; width: min(480px, calc(100% - 400px));
-  z-index: 3; display: flex; align-items: center; justify-content: center; gap: 24px;
+  position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+  height: 68px; width: min(520px, calc(100% - 380px));
+  z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
 }
 @media (max-width: 680px) {
   .crossfader { position: static; transform: none; height: auto; width: auto; margin-bottom: 14px; padding: 8px 0; }
 }
+.crossfader-row { display: flex; align-items: center; justify-content: center; gap: 16px; width: 100%; }
 .crossfader-label { font-family: var(--font-ui); font-size: 36px; font-weight: 700; color: var(--fg); }
+/* The live "master tempo" readout — whichever deck is currently
+   driving the set (see frame()). Sits above the A/track/B row rather
+   than inline with it, so it reads as a status line for the mixer as
+   a whole rather than a third item in the A/B balance indicator.
+   Tabular-nums keeps the digits from jittering in width as it glides
+   during a tempo ramp. */
+.master-tempo {
+  font-family: var(--font-ui); font-size: 14px; font-weight: 700; color: var(--fg);
+  font-variant-numeric: tabular-nums; white-space: nowrap; opacity: 0.85;
+}
 .crossfader-track {
   position: relative; flex: 1; height: 7px; background: var(--fg); border-radius: 4px;
   min-width: 0;
@@ -265,13 +282,17 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   background: var(--menu-surface); border-radius: 12px;
   padding: 10px; display: flex; flex-direction: column; gap: 10px;
   font-family: var(--font-ui);
+  overflow: hidden;
 }
 .track-menu-header, .track-menu-row {
   display: flex; align-items: center; gap: 14px;
   padding: 10px 20px; border-radius: 12px;
 }
 .track-menu-header { background: var(--chrome); font-size: 16px; font-weight: 700; color: var(--text-on-chrome); }
-.track-menu-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
+/* min-height: 0 is load-bearing here — without it a flex child ignores
+   the column parent's max-height and just grows to fit all its rows,
+   so overflow-y: auto never actually has anything to scroll. */
+.track-menu-list { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding: 2px; }
 .track-menu-row { cursor: pointer; background: transparent; transition: background-color 0.1s ease; }
 .track-menu-row.highlighted { background: var(--accent-b); }
 .track-menu-row.on-deck { border-radius: 43px; background: var(--chrome); }
@@ -316,27 +337,8 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .pause-hint { margin-top: 12px; font-family: var(--mono); font-size: 13px; color: rgba(255, 255, 255, 0.75); text-align: center; }
 @keyframes pauseBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.35; } }
 
-.harmony-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.harmony-badge {
-  font-size: 13px; padding: 6px 10px; border-radius: 8px;
-  border: 1px solid var(--line); background: var(--panel-raised); color: var(--fg-dim);
-}
-.harmony-badge.good { border-color: var(--ok); color: var(--ok); }
-.harmony-badge.warn { border-color: var(--warn); color: var(--warn); }
-.harmony-badge.bad { border-color: var(--accent-a); color: var(--accent-a); }
-
-.mix-state {
-  font-size: 13px; font-family: var(--mono); color: var(--fg);
-  background: var(--panel-raised); border: 1px solid var(--line);
-  border-radius: 8px; padding: 10px 12px; min-height: 1.4em;
-}
-.mix-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-button.mixin { background: linear-gradient(90deg, var(--accent-a), var(--accent-b)); color: #110b16; border: none; }
-button.stopall { background: transparent; }
-button.pause { background: transparent; }
-
 .log {
-  background: #000; color: #8fe88f; font-family: var(--mono);
+  background: #000; color: #8fe88f; font-family: var(--mono); margin-bottom: 20px;
   font-size: 11.5px; line-height: 1.5; border-radius: 10px;
   padding: 10px 12px; height: 130px; overflow-y: auto; white-space: pre-wrap;
 }
@@ -352,9 +354,12 @@ button.pause { background: transparent; }
 
   <div class="decks">
     <div class="crossfader">
-      <span class="crossfader-label">A</span>
-      <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
-      <span class="crossfader-label">B</span>
+      <span class="master-tempo" id="masterTempo">❤️ --.- BPM</span>
+      <div class="crossfader-row">
+        <span class="crossfader-label">A</span>
+        <div class="crossfader-track"><div class="crossfader-handle" id="crossfaderHandle"></div></div>
+        <span class="crossfader-label">B</span>
+      </div>
     </div>
 
     <div class="deck" data-slot="a" id="deckA">
@@ -363,13 +368,9 @@ button.pause { background: transparent; }
         <span class="deck-bpm" id="pillBpmA">❤️--.- BPM</span>
       </div>
       <div class="deck-player">
-        <div class="deck-playarea">
+        <div class="deck-playarea" id="deckPlayareaA">
           <button class="deck-toggle" id="toggleA" disabled aria-label="Arm Deck A">
-            <svg viewBox="0 0 59 59">
-              <circle cx="29.5" cy="29.5" r="29.5" fill="var(--chrome)"></circle>
-              <circle cx="29.5" cy="29.5" r="25.5" fill="var(--accent-green)"></circle>
-              <path id="toggleIconA" fill="var(--chrome)" d="M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.715 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.05 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 44.94 34.04 C 46.53 33.06 47.48 31.37 47.48 29.5 C 47.48 27.63 46.53 25.94 44.94 24.96 Z M 43.8 29.5 C 43.8 30.09 43.51 30.6 43.01 30.9 L 23.71 42.75 C 23.19 43.07 22.57 43.08 22.04 42.79 C 21.51 42.49 21.2 41.96 21.2 41.35 L 21.2 17.65 C 21.198 17.212 21.372 16.791 21.682 16.482 C 21.991 16.172 22.412 15.998 22.85 16 C 23.15 16 23.45 16.09 23.71 16.25 L 43.01 28.1 C 43.51 28.41 43.8 28.92 43.8 29.5 Z"></path>
-            </svg>
+            <svg viewBox="0 0 59 59" id="toggleSvgA"></svg>
           </button>
         </div>
         <div class="deck-canvas-wrap" id="deckCanvasWrapA">
@@ -396,13 +397,9 @@ button.pause { background: transparent; }
         <span class="deck-bpm" id="pillBpmB">❤️--.- BPM</span>
       </div>
       <div class="deck-player">
-        <div class="deck-playarea">
+        <div class="deck-playarea" id="deckPlayareaB">
           <button class="deck-toggle" id="toggleB" disabled aria-label="Arm Deck B">
-            <svg viewBox="0 0 59 59">
-              <circle cx="29.5" cy="29.5" r="29.5" fill="var(--chrome)"></circle>
-              <circle cx="29.5" cy="29.5" r="25.5" fill="var(--accent-green)"></circle>
-              <path id="toggleIconB" fill="var(--chrome)" d="M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.715 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.05 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 44.94 34.04 C 46.53 33.06 47.48 31.37 47.48 29.5 C 47.48 27.63 46.53 25.94 44.94 24.96 Z M 43.8 29.5 C 43.8 30.09 43.51 30.6 43.01 30.9 L 23.71 42.75 C 23.19 43.07 22.57 43.08 22.04 42.79 C 21.51 42.49 21.2 41.96 21.2 41.35 L 21.2 17.65 C 21.198 17.212 21.372 16.791 21.682 16.482 C 21.991 16.172 22.412 15.998 22.85 16 C 23.15 16 23.45 16.09 23.71 16.25 L 43.01 28.1 C 43.51 28.41 43.8 28.92 43.8 29.5 Z"></path>
-            </svg>
+            <svg viewBox="0 0 59 59" id="toggleSvgB"></svg>
           </button>
         </div>
         <div class="deck-canvas-wrap" id="deckCanvasWrapB">
@@ -459,19 +456,6 @@ button.pause { background: transparent; }
       </div>
     </div>
 
-
-    <div class="harmony-row">
-      <span class="harmony-badge" id="harmonyBadge">Load a record into each deck to check harmonic compatibility.</span>
-      <button id="applyTranspose" hidden>Apply suggested transpose</button>
-    </div>
-
-    <div class="mix-state" id="mixState">Idle. Arm a deck to start the set, load a record into the other deck, then trigger Beatmatch Mix.</div>
-
-    <div class="mix-actions">
-      <button class="mixin" id="mixIn" disabled>Beatmatch Mix (auto phrase-sync)</button>
-      <button class="pause" id="pauseBtn">Pause</button>
-      <button class="stopall" id="stopAll">Stop All</button>
-    </div>
   </div>
 </div>
 
@@ -531,6 +515,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // (refreshed in ensureAudio) stays accurate.
   const nativeCtx = new (window.AudioContext || window.webkitAudioContext)();
   let clockOffset = 0;
+  // outputLatency (where supported) is the device's actual estimated
+  // round-trip out to the speaker/headphones — tens to hundreds of ms on
+  // real hardware, far more than baseLatency (just the context's own
+  // internal buffer). Falls back to baseLatency where outputLatency isn't
+  // exposed (e.g. Safari) or hasn't started reporting yet.
+  function outputLatencySeconds() {
+    const out = nativeCtx.outputLatency;
+    return (typeof out === "number" && out > 0) ? out : (nativeCtx.baseLatency || 0);
+  }
   function toNativeTime(toneTime) {
     return toneTime - clockOffset;
   }
@@ -560,6 +553,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const events = [];
     const spans = [];
     const programs = new Map();
+    // Some source files carry literal duplicate Note entries — the exact
+    // same channel/pitch/start-time twice over (seen in a couple of the
+    // library's messier transcriptions). Two near-simultaneous identical
+    // noteOns confuse the synth's own per-(channel,note) voice tracking
+    // badly enough to leave a voice stuck "on" after a pause/resume
+    // cycle, so collapse exact duplicates down to a single note here,
+    // before they ever reach the scheduler.
+    const seen = new Set();
     midi.tracks.forEach((track) => {
       const isPerc = !!(track.instrument && track.instrument.percussion) || track.channel === 9;
       const channel = isPerc ? 9 : track.channel;
@@ -568,6 +569,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         if (!programs.has(channel)) programs.set(channel, program);
       }
       track.notes.forEach((n) => {
+        const dupeKey = `${channel}:${n.midi}:${n.time}`;
+        if (seen.has(dupeKey)) return;
+        seen.add(dupeKey);
         if (!isPerc) melodic.push({ time: n.time, duration: n.duration, velocity: n.velocity, midi: n.midi });
         events.push({ type: "on", time: n.time, channel, midi: n.midi, velocity: n.velocity });
         events.push({ type: "off", time: n.time + n.duration, channel, midi: n.midi });
@@ -649,20 +653,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return key.mode === "major" ? `hsl(${hue}, 72%, 52%)` : `hsl(${hue}, 55%, 38%)`;
   }
 
-  function keyCompatibility(keyA, keyB) {
-    const diff = ((keyB.root - keyA.root) % 12 + 12) % 12;
-    if (keyA.mode === keyB.mode && diff === 0) return { label: "Same key — should lock together cleanly", level: "good" };
-    if (keyA.mode !== keyB.mode) {
-      const relMinorOfA = (keyA.root - 3 + 12) % 12;
-      const relMinorOfB = (keyB.root - 3 + 12) % 12;
-      if (keyA.mode === "major" && keyB.mode === "minor" && relMinorOfA === keyB.root) return { label: "Relative major/minor — compatible", level: "good" };
-      if (keyA.mode === "minor" && keyB.mode === "major" && relMinorOfB === keyA.root) return { label: "Relative major/minor — compatible", level: "good" };
-    }
-    if (keyA.mode === keyB.mode && (diff === 7 || diff === 5)) return { label: "A fifth apart — compatible (energy shift)", level: "good" };
-    if (keyA.mode === keyB.mode && (diff === 2 || diff === 10)) return { label: "A whole step apart — mild clash", level: "warn" };
-    return { label: "Likely dissonant together", level: "bad" };
-  }
-
   // --- the record bin ---
   const binEntries = [];
   // Markers placed by the MIDI Marker Tool (or any MIDI editor) — real
@@ -676,14 +666,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       .sort((a, b) => a.time - b.time);
   }
 
-  // The grid anchor is a single special point — "the track's real first
+  // The grid start is a single special point — "the track's real first
   // downbeat" — read from a MIDI Cue Point (not a Marker; a different
-  // meta-event type, set via the MIDI Marker Tool's "Set grid anchor").
+  // meta-event type, set via the MIDI Marker Tool's "Set grid start").
   // When present, the automatic bar-count phrasing and the piano roll's
   // grid both count bar 1 from here instead of assuming it's at the
   // file's own time zero, the same role a beatgrid marker plays in
   // Traktor. null when a track has none (falls back to time zero).
-  function extractGridAnchor(midi) {
+  function extractGridStart(midi) {
     const cue = (midi.header.meta || []).find((m) => m.type === "cuePoint");
     return cue ? midi.header.ticksToSeconds(cue.ticks) : null;
   }
@@ -720,13 +710,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const barsData = analyzeBars(info);
     const key = detectKey(info);
     const markers = extractMarkers(midi);
-    const gridAnchor = extractGridAnchor(midi);
+    const gridStart = extractGridStart(midi);
     const { title, artist } = extractTitleArtist(midi);
     // Falls back to the uploaded filename whenever the file has no
     // title baked in — true for every file until it's been through the
     // Marker Tool's new Track Info fields.
     const displayName = title ? (artist ? `${artist} — ${title}` : title) : name;
-    return { id: crypto.randomUUID(), name: displayName, title, artist, midi, bpm, duration, barsData, key, markers, gridAnchor };
+    return { id: crypto.randomUUID(), name: displayName, title, artist, midi, bpm, duration, barsData, key, markers, gridStart };
   }
 
   function clampNote(n) {
@@ -755,14 +745,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return slot.duration * (slot.bpm / slot.effectiveBpm);
   }
 
-  // Where this deck's grid anchor (its real first downbeat, if set) sits
+  // Where this deck's grid start (its real first downbeat, if set) sits
   // in TRANSPORT-elapsed seconds — same scaling ratio as
   // effectiveDuration above. 0 (file's own time zero) when the track has
-  // no grid anchor, which reduces every call site below to the original
+  // no grid start, which reduces every call site below to the original
   // "bar 1 starts at the top of the file" assumption.
-  function gridAnchorElapsed(slot) {
-    if (slot.gridAnchor == null) return 0;
-    return slot.gridAnchor * (slot.bpm / slot.effectiveBpm);
+  function gridStartElapsed(slot) {
+    if (slot.gridStart == null) return 0;
+    return slot.gridStart * (slot.bpm / slot.effectiveBpm);
   }
 
   function formatClock(seconds) {
@@ -818,14 +808,20 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return lo;
   }
 
+  // Shared with togglePause below: notes get dispatched to the synth up
+  // to this far ahead of when they actually sound (so Web Audio has
+  // lead time to schedule them precisely) — pausing has to know this
+  // margin to avoid racing already-dispatched notes, see togglePause.
+  const SCHEDULER_LOOKAHEAD = 0.05;
+
   function makeEventScheduler(slot, events, timeScale, loopEnd) {
-    const LOOKAHEAD = 0.05;
+    const LOOKAHEAD = SCHEDULER_LOOKAHEAD;
     let idx = 0;
     let loopsElapsed = 0;
     let startAtContext = null;
     let repeatId = null;
     // Where this deck's playback actually begins, in native seconds —
-    // 0 normally, or a track's own grid anchor when it's entering a mix
+    // 0 normally, or a track's own grid start when it's entering a mix
     // via one (see mixIn): everything before that point in the file
     // just never plays, the same way triggering a cue point in Traktor
     // starts a deck there rather than catching up on what came before.
@@ -882,6 +878,29 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         if (repeatId !== null) return;
         fromTime = startFromTime || 0;
         idx = lowerBoundByTime(events, fromTime);
+        // A note whose "on" a PRIOR scheduler instance already fired —
+        // dispatched via its own LOOKAHEAD margin, right before being
+        // disposed — can have its "off" land just behind `fromTime` by
+        // the time this new instance starts, purely from how much real
+        // time passed in between. idx above would silently skip that
+        // "off" (its time is < fromTime), leaving the note stuck
+        // sounding forever with nothing left to ever release it. Only
+        // startTempoRamp's repeated same-events() swaps hit this in
+        // practice — every other dispose() pairs with silenceSynth()
+        // instead — but there it's frequent: 40 swaps over one glide,
+        // each a fresh chance to strand a short note like a kick or
+        // hi-hat. Sweep one lookahead window further back than idx and
+        // release anything still pending there directly, bypassing the
+        // normal scheduled-fire path since it's already overdue; a
+        // redundant noteOff on an already-released note is a no-op, so
+        // this is safe even in the ordinary, non-stranded case.
+        const strandedFrom = lowerBoundByTime(events, Math.max(0, fromTime - SCHEDULER_LOOKAHEAD * 2));
+        for (let i = strandedFrom; i < idx; i++) {
+          const ev = events[i];
+          if (ev.type !== "off") continue;
+          const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
+          slot.synth.noteOff(ev.channel, note, { time: nativeCtx.currentTime });
+        }
         loopsElapsed = 0;
         firstLapLen = loopEnd - fromTime * timeScale;
         startAtContext = null; // re-calibrated from this start's own first tick, see tick() above
@@ -906,8 +925,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const synth = new WorkletSynthesizer(nativeCtx);
     synth.connect(gain);
     gain.connect(masterCompressor);
-    gain.connect(reverbSend);
-    gain.connect(chorusSend);
+    if (reverbSend) gain.connect(reverbSend);
+    if (chorusSend) gain.connect(chorusSend);
 
     return {
       name, gain, synth,
@@ -917,15 +936,16 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       playing: false,
       // Real MIDI Marker meta-events baked into the file (see
       // extractMarkers) — purely annotations, shown on the piano roll.
-      // `gridAnchor` (see extractGridAnchor) is the track's own native-
-      // time grid-anchor position, or null if it has none — re-anchors
+      // `gridStart` (see extractGridStart) is the track's own native-
+      // time grid-start position, or null if it has none — re-anchors
       // bar 1 for both the automatic phrasing math and the piano roll's
       // grid. `spans`/pitchMin/pitchMax are the note data and pitch
       // range for drawing the roll; both populated in buildParts, once
       // per load, alongside the playback event stream.
       markers: [],
-      gridAnchor: null,
+      gridStart: null,
       spans: [],
+      events: [],
       pitchMin: 48,
       pitchMax: 72,
       // The deck's native tempo (`bpm`) only describes the record as
@@ -940,6 +960,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       // because Transport never resets — every deck after the very
       // first one starts partway through Transport's own timeline.
       transportStartOffset: 0,
+      // Post-mix tempo ramp (see startTempoRamp): Transport.seconds
+      // deadline a deck stays locked until, and a function that cancels
+      // the ramp's repeating tick (null when no ramp is in flight).
+      lockedUntil: 0,
+      rampCancel: null,
     };
   }
 
@@ -961,43 +986,55 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // (unlike the old Tone.Reverb, which lived on Tone's own context and
   // couldn't take native input) no cross-context bridging is needed.
   //
-  // Reverb: a ConvolverNode needs an impulse response. Rather than fetch
-  // one, synthesize a plate-ish tail client-side — exponentially-decaying
-  // white noise is the standard no-asset way to drive a ConvolverNode.
-  function makeReverbImpulse(ctx, durationSec = 2.2, decay = 2.5) {
-    const length = Math.round(ctx.sampleRate * durationSec);
-    const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
-    for (let ch = 0; ch < 2; ch++) {
-      const data = impulse.getChannelData(ch);
-      for (let i = 0; i < length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+  // TEMPORARILY DISABLED for CPU-load testing — a ConvolverNode is one
+  // of the more expensive things Web Audio can run in real time (a
+  // continuous FFT-based convolution against a multi-second buffer),
+  // stacked on top of two full polyphonic SF2 synths. Flip back to
+  // `true` once it's confirmed this isn't the source of the timing
+  // issues under investigation; nothing else needs to change, makeSlot
+  // below already no-ops its sends when these are null.
+  const FX_ENABLED = false;
+  let reverbSend = null, chorusSend = null;
+  if (FX_ENABLED) {
+    // Reverb: a ConvolverNode needs an impulse response. Rather than
+    // fetch one, synthesize a plate-ish tail client-side —
+    // exponentially-decaying white noise is the standard no-asset way
+    // to drive a ConvolverNode.
+    const makeReverbImpulse = (ctx, durationSec = 2.2, decay = 2.5) => {
+      const length = Math.round(ctx.sampleRate * durationSec);
+      const impulse = ctx.createBuffer(2, length, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const data = impulse.getChannelData(ch);
+        for (let i = 0; i < length; i++) {
+          data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+        }
       }
-    }
-    return impulse;
-  }
-  const reverbSend = nativeCtx.createGain();
-  reverbSend.gain.value = 0.33; // matches chiptune.app's own default
-  const reverbNode = nativeCtx.createConvolver();
-  reverbNode.buffer = makeReverbImpulse(nativeCtx);
-  reverbSend.connect(reverbNode);
-  reverbNode.connect(masterCompressor);
+      return impulse;
+    };
+    reverbSend = nativeCtx.createGain();
+    reverbSend.gain.value = 0.33; // matches chiptune.app's own default
+    const reverbNode = nativeCtx.createConvolver();
+    reverbNode.buffer = makeReverbImpulse(nativeCtx);
+    reverbSend.connect(reverbNode);
+    reverbNode.connect(masterCompressor);
 
-  // Chorus: a short delay line whose time is slowly LFO-modulated, mixed
-  // back in alongside the dry signal — classic doubling/thickening,
-  // again no external assets needed.
-  const chorusSend = nativeCtx.createGain();
-  chorusSend.gain.value = 0.5; // matches chiptune.app's own default
-  const chorusDelay = nativeCtx.createDelay(0.05);
-  chorusDelay.delayTime.value = 0.02;
-  const chorusLFO = nativeCtx.createOscillator();
-  chorusLFO.frequency.value = 0.8;
-  const chorusLFODepth = nativeCtx.createGain();
-  chorusLFODepth.gain.value = 0.004;
-  chorusLFO.connect(chorusLFODepth);
-  chorusLFODepth.connect(chorusDelay.delayTime);
-  chorusLFO.start();
-  chorusSend.connect(chorusDelay);
-  chorusDelay.connect(masterCompressor);
+    // Chorus: a short delay line whose time is slowly LFO-modulated,
+    // mixed back in alongside the dry signal — classic doubling/
+    // thickening, again no external assets needed.
+    chorusSend = nativeCtx.createGain();
+    chorusSend.gain.value = 0.5; // matches chiptune.app's own default
+    const chorusDelay = nativeCtx.createDelay(0.05);
+    chorusDelay.delayTime.value = 0.02;
+    const chorusLFO = nativeCtx.createOscillator();
+    chorusLFO.frequency.value = 0.8;
+    const chorusLFODepth = nativeCtx.createGain();
+    chorusLFODepth.gain.value = 0.004;
+    chorusLFO.connect(chorusLFODepth);
+    chorusLFODepth.connect(chorusDelay.delayTime);
+    chorusLFO.start();
+    chorusSend.connect(chorusDelay);
+    chorusDelay.connect(masterCompressor);
+  }
 
   // Constructing a WorkletSynthesizer needs the processor module already
   // registered on this AudioContext, and loading a soundfont is async —
@@ -1031,6 +1068,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const { events, spans, programs } = collectNotes(slot.midi);
     programs.forEach((program, channel) => slot.synth.programChange(channel, program));
 
+    // Cached so a tempo ramp (see startTempoRamp) can rebuild the
+    // scheduler at a new scale repeatedly without re-walking the MIDI.
+    slot.events = events;
     slot.spans = spans;
     let minP = 127, maxP = 0;
     spans.forEach((s) => { minP = Math.min(minP, s.midi); maxP = Math.max(maxP, s.midi); });
@@ -1057,6 +1097,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   function stopSlot(slot) {
+    if (slot.rampCancel) slot.rampCancel();
+    slot.lockedUntil = 0;
     if (slot.eventsPart) slot.eventsPart.stop(0);
     silenceSynth(slot);
     nativeRampTo(slot.gain.gain, 0, 0.1);
@@ -1099,8 +1141,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const liveBadgeB = document.getElementById("liveBadgeB");
   const toggleA = document.getElementById("toggleA");
   const toggleB = document.getElementById("toggleB");
-  const toggleIconA = document.getElementById("toggleIconA");
-  const toggleIconB = document.getElementById("toggleIconB");
+  const toggleSvgA = document.getElementById("toggleSvgA");
+  const toggleSvgB = document.getElementById("toggleSvgB");
+  const deckPlayareaA = document.getElementById("deckPlayareaA");
+  const deckPlayareaB = document.getElementById("deckPlayareaB");
   const timeRemainingElA = document.getElementById("timeRemainingA");
   const timeRemainingElB = document.getElementById("timeRemainingB");
   const timeElapsedElA = document.getElementById("timeElapsedA");
@@ -1116,14 +1160,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const phraseCtxA = phraseCanvasA.getContext("2d");
   const phraseCtxB = phraseCanvasB.getContext("2d");
   const crossfaderHandle = document.getElementById("crossfaderHandle");
+  const masterTempoEl = document.getElementById("masterTempo");
   const trackMenuBackdrop = document.getElementById("trackMenuBackdrop");
   const trackMenuList = document.getElementById("trackMenuList");
-  const harmonyBadge = document.getElementById("harmonyBadge");
-  const applyTranspose = document.getElementById("applyTranspose");
-  const mixStateEl = document.getElementById("mixState");
-  const mixIn = document.getElementById("mixIn");
-  const stopAllBtn = document.getElementById("stopAll");
-  const pauseBtn = document.getElementById("pauseBtn");
   const pauseOverlay = document.getElementById("pauseOverlay");
   const themeToggle = document.getElementById("themeToggle");
   const themeToggleIcon = document.getElementById("themeToggleIcon");
@@ -1136,10 +1175,16 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     return null;
   }
 
+  // Replaces what a disabled-button-state used to track, now that
+  // Beatmatch Mix has no on-screen button of its own — mixInAvailable
+  // is "is there a valid target to mix into," mixInBusy is "is a mix
+  // already in flight" (set around triggerBeatmatchMix's own body).
+  let mixInAvailable = false;
+  let mixInBusy = false;
   function refreshMixInAvailability() {
     if (mixState.phase !== "idle" && mixState.phase !== "done") return;
     const roles = getAnchorIncoming();
-    mixIn.disabled = !(roles && roles.incoming.midi);
+    mixInAvailable = !!(roles && roles.incoming.midi);
   }
 
   function updateLiveBadges() {
@@ -1188,14 +1233,27 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const viewStart = elapsed - viewDuration * DECK_PLAYHEAD_FRACTION;
     const xFor = (tTransport) => ((tTransport - viewStart) / viewDuration) * w;
 
-    const gridAnchorTransport = (slot.gridAnchor != null ? slot.gridAnchor : 0) * scale;
+    const gridStartTransport = (slot.gridStart != null ? slot.gridStart : 0) * scale;
     const lineColor = getComputedStyle(document.documentElement).getPropertyValue("--line").trim() || "#352f3f";
     ctx.lineWidth = 1;
     ctx.strokeStyle = lineColor;
     const phraseLenBars = parseInt(phraseLenSel.value, 10) || 4;
-    let bar = Math.floor((viewStart - gridAnchorTransport) / barLen) - 1;
+
+    // Shade the bar(s) the playhead currently sits inside, grouped to the
+    // same phrase length as the phrase-boundary gridlines below — "1 bar"
+    // highlights just the current bar, "4 bars" the whole phrase it's in.
+    // Drawn first, before gridlines/notes, so it reads as a background
+    // wash rather than an opaque overlay sitting on top of everything.
+    const barAtElapsed = Math.floor((elapsed - gridStartTransport) / barLen);
+    const phraseStartBar = Math.floor(barAtElapsed / phraseLenBars) * phraseLenBars;
+    const phraseStart = gridStartTransport + phraseStartBar * barLen;
+    const phraseEnd = phraseStart + phraseLenBars * barLen;
+    ctx.fillStyle = "rgba(33, 219, 148, 0.18)";
+    ctx.fillRect(xFor(phraseStart), 0, xFor(phraseEnd) - xFor(phraseStart), h);
+
+    let bar = Math.floor((viewStart - gridStartTransport) / barLen) - 1;
     for (;;) {
-      const t = gridAnchorTransport + bar * barLen;
+      const t = gridStartTransport + bar * barLen;
       if (t > viewStart + viewDuration) break;
       const x = xFor(t);
       ctx.globalAlpha = bar % phraseLenBars === 0 ? 0.9 : 0.35;
@@ -1234,21 +1292,21 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       }
     });
 
-    // Grid anchor — drawn distinctly from regular markers (cyan, flag
+    // Grid start — drawn distinctly from regular markers (cyan, flag
     // at the TOP instead of the bottom), same convention as the MIDI
     // Marker Tool, since it's not an annotation, it's the actual
     // beatgrid reference everything else on this canvas counts from.
-    if (slot.gridAnchor != null && gridAnchorTransport >= viewStart - 1 && gridAnchorTransport <= viewStart + viewDuration) {
-      const x = xFor(gridAnchorTransport);
+    if (slot.gridStart != null && gridStartTransport >= viewStart - 1 && gridStartTransport <= viewStart + viewDuration) {
+      const x = xFor(gridStartTransport);
       ctx.strokeStyle = "#4fd6ff";
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); ctx.stroke();
       ctx.font = "10px monospace";
-      const tw = ctx.measureText("anchor").width + 8;
+      const tw = ctx.measureText("start").width + 8;
       ctx.fillStyle = "#121016";
       ctx.fillRect(x + 1, 0, tw, 15);
       ctx.fillStyle = "#4fd6ff";
-      ctx.fillText("anchor", x + 4, 11);
+      ctx.fillText("start", x + 4, 11);
     }
 
     if (overlapStart !== null) {
@@ -1272,29 +1330,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke();
   }
 
-  function updateHarmony() {
-    if (!slotA.key || !slotB.key) {
-      harmonyBadge.textContent = "Load a record into each deck to check harmonic compatibility.";
-      harmonyBadge.className = "harmony-badge";
-      applyTranspose.hidden = true;
-      return;
-    }
-    const compat = keyCompatibility(slotA.key, slotB.key);
-    harmonyBadge.textContent = `Deck A: ${slotA.key.name} · Deck B: ${slotB.key.name} — ${compat.label}`;
-    harmonyBadge.className = "harmony-badge " + compat.level;
-    if (compat.level === "good") { applyTranspose.hidden = true; return; }
-
-    const roles = getAnchorIncoming();
-    const anchor = roles ? roles.anchor : slotA;
-    const target = roles ? roles.incoming : slotB;
-    let shift = ((anchor.key.root - target.key.root) % 12 + 12) % 12;
-    if (shift > 6) shift -= 12;
-    applyTranspose.textContent = `Apply suggested transpose (${shift >= 0 ? "+" : ""}${shift} st) to Deck ${target.name}`;
-    applyTranspose.dataset.shift = shift;
-    applyTranspose.dataset.targetDeck = target.name;
-    applyTranspose.hidden = false;
-  }
-
   // The inverse of loadBinEntryIntoDeck below — resets a deck's loaded
   // track back to the empty "No record loaded" state. Used once a deck
   // auto-stops after mixing out, so it visibly looks ready for a fresh
@@ -1308,13 +1343,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const markerEl = which === "A" ? markerA : markerB;
     const toggleBtn = which === "A" ? toggleA : toggleB;
 
+    if (slot.rampCancel) slot.rampCancel();
+    slot.lockedUntil = 0;
     slot.midi = null;
     slot.bpm = 120;
     slot.duration = 0;
     slot.barsData = null;
     slot.key = null;
     slot.markers = [];
-    slot.gridAnchor = null;
+    slot.gridStart = null;
     slot.binId = null;
     slot.effectiveBpm = 120;
 
@@ -1328,8 +1365,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     markerEl.textContent = "";
     markerEl.classList.remove("warn");
     toggleBtn.disabled = true;
-
-    updateHarmony();
   }
 
   async function loadBinEntryIntoDeck(entry, which) {
@@ -1352,7 +1387,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     slot.barsData = entry.barsData;
     slot.key = entry.key;
     slot.markers = entry.markers || [];
-    slot.gridAnchor = entry.gridAnchor != null ? entry.gridAnchor : null;
+    slot.gridStart = entry.gridStart != null ? entry.gridStart : null;
     slot.binId = entry.id;
     slot.semitoneShift.value = 0;
     slot.effectiveBpm = entry.bpm;
@@ -1367,15 +1402,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     pillKeyEl.textContent = slot.key ? slot.key.name : "—";
     pillEl.style.background = keyPillColor(slot.key) || "";
     pillBpmEl.textContent = `${slot.bpm.toFixed(1)} BPM`;
-    const anchorText = slot.gridAnchor != null ? `grid anchor at ${formatClock(slot.gridAnchor)}` : "no grid anchor (bar 1 = file start)";
+    const anchorText = slot.gridStart != null ? `grid start at ${formatClock(slot.gridStart)}` : "no grid start (bar 1 = file start)";
     const markerText = slot.markers.length ? `${slot.markers.length} marker${slot.markers.length === 1 ? "" : "s"}` : "no markers";
     markerEl.textContent = `${anchorText} · ${markerText}`;
-    markerEl.classList.toggle("warn", slot.gridAnchor == null);
+    markerEl.classList.toggle("warn", slot.gridStart == null);
     toggleBtn.disabled = false;
 
     log(`Loaded "${entry.name}" onto Deck ${which} — ${slot.bpm.toFixed(1)} BPM, ${slot.key ? slot.key.name : "no tonal center"}.`);
 
-    updateHarmony();
     updateLiveBadges();
     refreshMixInAvailability();
   }
@@ -1385,23 +1419,36 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // can stop it anymore (see the keydown handler) — the only ways a
   // live deck goes quiet now are the Beatmatch Mix fading it out
   // automatically, Stop All, or Pause freezing everything in place.
-  // The play-triangle path is the Framer reference's own icon, read
-  // directly from its SVG; the stop-square is new (there's no "playing"
-  // variant to read in the reference), built in the same 59x59 space.
-  const PLAY_PATH = "M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.715 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.05 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 44.94 34.04 C 46.53 33.06 47.48 31.37 47.48 29.5 C 47.48 27.63 46.53 25.94 44.94 24.96 Z M 43.8 29.5 C 43.8 30.09 43.51 30.6 43.01 30.9 L 23.71 42.75 C 23.19 43.07 22.57 43.08 22.04 42.79 C 21.51 42.49 21.2 41.96 21.2 41.35 L 21.2 17.65 C 21.198 17.212 21.372 16.791 21.682 16.482 C 21.991 16.172 22.412 15.998 22.85 16 C 23.15 16 23.45 16.09 23.71 16.25 L 43.01 28.1 C 43.51 28.41 43.8 28.92 43.8 29.5 Z";
-  const STOP_PATH = "M 20 20 H 39 V 39 H 20 Z";
-  function setToggleIcon(iconEl, playing) {
-    iconEl.setAttribute("d", playing ? STOP_PATH : PLAY_PATH);
+  // Both icons are the designer's own assets (Reference Assets/
+  // play-icon.svg and play-locked-icon.svg), inlined as innerHTML with
+  // their literal fills swapped for the matching design tokens
+  // (rgb(33,219,148) = --accent-green, rgb(245,245,245) = --chrome)
+  // so they stay theme-consistent like everything else on the page;
+  // the locked icon's muted ring (rgb(217,217,217)) has no existing
+  // token and matches .deck-playarea's own default gray, so it's left
+  // as a literal to make that relationship obvious.
+  const PLAY_ICON_SVG = `
+    <path d="M 29.5 4 C 15.44 4 4 15.44 4 29.5 C 4 43.56 15.44 55 29.5 55 C 43.56 55 55 43.56 55 29.5 C 55 15.44 43.56 4 29.5 4 Z" fill="var(--accent-green)"></path>
+    <path d="M 29.5 0 C 13.23 0 0 13.23 0 29.5 C 0 45.77 13.23 59 29.5 59 C 45.77 59 59 45.77 59 29.5 C 59 13.23 45.77 0 29.5 0 Z M 29.5 55 C 15.44 55 4 43.56 4 29.5 C 4 15.44 15.44 4 29.5 4 C 43.56 4 55 15.44 55 29.5 C 55 43.56 43.56 55 29.5 55 Z" fill="var(--chrome)"></path>
+    <path d="M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.715 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.05 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 44.94 34.04 C 46.53 33.06 47.48 31.37 47.48 29.5 C 47.48 27.63 46.53 25.94 44.94 24.96 Z M 43.8 29.5 C 43.8 30.09 43.51 30.6 43.01 30.9 L 23.71 42.75 C 23.19 43.07 22.57 43.08 22.04 42.79 C 21.51 42.49 21.2 41.96 21.2 41.35 L 21.2 17.65 C 21.198 17.212 21.372 16.791 21.682 16.482 C 21.991 16.172 22.412 15.998 22.85 16 C 23.15 16 23.45 16.09 23.71 16.25 L 43.01 28.1 C 43.51 28.41 43.8 28.92 43.8 29.5 Z" fill="var(--chrome)"></path>
+  `;
+  const LOCKED_ICON_SVG = `
+    <path d="M 29.5 4 C 15.44 4 4 15.44 4 29.5 C 4 43.56 15.44 55 29.5 55 C 43.56 55 55 43.56 55 29.5 C 55 15.44 43.56 4 29.5 4 Z" fill="#d9d9d9"></path>
+    <path d="M 29.5 0 C 13.23 0 0 13.23 0 29.5 C 0 45.77 13.23 59 29.5 59 C 45.77 59 59 45.77 59 29.5 C 59 13.23 45.77 0 29.5 0 Z M 29.5 55 C 15.44 55 4 43.56 4 29.5 C 4 15.44 15.44 4 29.5 4 C 43.56 4 55 15.44 55 29.5 C 55 43.56 43.56 55 29.5 55 Z" fill="var(--chrome)"></path>
+    <path d="M 44.94 24.96 L 25.64 13.11 C 23.97 12.09 21.96 12.04 20.25 13 C 18.553 13.929 17.504 15.716 17.52 17.65 L 17.52 41.35 C 17.52 43.31 18.54 45.04 20.25 46 C 21.05 46.45 21.95 46.69 22.85 46.69 C 23.82 46.69 24.79 46.41 25.64 45.89 L 27.62 44.68 C 28.487 44.15 28.76 43.017 28.23 42.15 C 27.7 41.283 26.567 41.01 25.7 41.54 L 23.72 42.75 C 23.2 43.07 22.58 43.08 22.05 42.78 C 21.52 42.49 21.21 41.95 21.21 41.34 L 21.21 17.64 C 21.21 17.04 21.53 16.5 22.05 16.2 C 22.58 15.91 23.2 15.92 23.72 16.23 L 43.02 28.08 C 43.52 28.39 43.8 28.9 43.8 29.48 C 43.8 30.06 43.51 30.58 43.01 30.89 L 40.97 32.14 C 40.55 32.4 40.26 32.8 40.14 33.28 C 40.03 33.76 40.1 34.25 40.36 34.67 C 40.62 35.09 41.02 35.38 41.5 35.5 C 41.98 35.61 42.47 35.53 42.89 35.28 L 44.93 34.03 C 46.511 33.064 47.474 31.343 47.47 29.49 C 47.47 27.62 46.52 25.93 44.93 24.95 Z" fill="var(--chrome)"></path>
+    <path d="M 34.5 29.39 C 36.31 29.39 37.78 30.86 37.78 32.67 L 37.78 34.4 C 38.88 34.628 39.67 35.596 39.67 36.72 L 39.67 41.68 C 39.67 42.99 38.61 44.05 37.3 44.05 L 31.7 44.05 C 30.39 44.05 29.33 42.99 29.33 41.68 L 29.33 36.72 C 29.33 35.57 30.14 34.62 31.22 34.4 L 31.22 32.67 C 31.22 30.86 32.69 29.39 34.5 29.39 Z M 37.52 43.82 L 37.71 43.79 L 37.51 43.82 Z M 39.45 41.68 C 39.45 41.82 39.44 41.96 39.41 42.1 L 39.44 41.9 C 39.44 41.83 39.45 41.75 39.45 41.68 Z M 34.5 36.7 C 33.67 36.7 32.99 37.38 32.99 38.21 C 32.99 38.86 33.4 39.41 33.98 39.63 L 33.98 41.19 C 33.98 41.48 34.21 41.71 34.5 41.71 C 34.79 41.71 35.02 41.48 35.02 41.19 L 35.02 39.63 C 35.6 39.42 36.01 38.87 36.01 38.21 C 36.01 37.38 35.33 36.7 34.5 36.7 Z M 34.5 30.69 C 33.4 30.69 32.51 31.58 32.51 32.68 L 32.51 34.36 L 36.48 34.36 L 36.48 32.68 C 36.48 31.58 35.59 30.69 34.5 30.69 Z" fill="var(--chrome)"></path>
+  `;
+  function setToggleIcon(svgEl, playareaEl, playing) {
+    svgEl.innerHTML = playing ? LOCKED_ICON_SVG : PLAY_ICON_SVG;
+    playareaEl.classList.toggle("live", playing);
   }
 
   async function armDeck(slot, which) {
     if (!slot.midi || slot.playing) return;
     const volSlider = which === "A" ? volA : volB;
-    const toggleIconEl = which === "A" ? toggleIconA : toggleIconB;
     await ensureAudio();
     playSlot(slot, volSlider.value);
     log(`Deck ${which} playing.`);
-    setToggleIcon(toggleIconEl, slot.playing);
     updateLiveBadges();
     refreshMixInAvailability();
   }
@@ -1418,6 +1465,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   let menuOpen = false;
   let menuHighlightIndex = 0;
   let paused = false;
+  // TEMPORARILY DISABLED while ruling out pause/resume (AudioContext
+  // suspend/resume, repeatedly) as a source of the timing issues under
+  // investigation — see the two guarded call sites below. togglePause()
+  // itself is untouched; flip this back to re-enable both the Enter/P
+  // hotkey and the pause overlay's click-to-resume.
+  const PAUSE_ENABLED = false;
   const deckCanvasWrapA = document.getElementById("deckCanvasWrapA");
   const deckCanvasWrapB = document.getElementById("deckCanvasWrapB");
 
@@ -1429,7 +1482,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // A playing deck is locked (see armDeck) — nothing to load onto it,
     // so it can't be selected either. Only the non-playing deck (or
     // neither, mid-crossfade when both are briefly live) is selectable.
-    if (slot.playing || selectedDeck === slot) return;
+    if (slot.playing || isRampLocked(slot) || selectedDeck === slot) return;
     selectedDeck = slot;
     renderSelection();
   }
@@ -1448,6 +1501,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       trackMenuList.appendChild(p);
       return;
     }
+    let highlightedRow = null;
     binEntries.forEach((entry, i) => {
       const onDeck = slotA.binId === entry.id ? "A" : slotB.binId === entry.id ? "B" : null;
       const row = document.createElement("div");
@@ -1486,14 +1540,24 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       row.append(colName, colKey, colBpm);
       row.addEventListener("click", () => { menuHighlightIndex = i; confirmMenuSelection(); });
       trackMenuList.appendChild(row);
+      if (i === menuHighlightIndex) highlightedRow = row;
     });
+    // Now that the list actually scrolls instead of just growing past the
+    // menu's own max-height, arrow-key navigation needs to carry the visible
+    // window along with it — "nearest" only scrolls when the highlighted row
+    // isn't already in view, so it doesn't jitter on every keypress once
+    // you're mid-list. This has to run after the whole list is built: called
+    // mid-loop, the browser only sees the rows appended so far, so scrolling
+    // up (toward a lower index) saw a list that didn't yet overflow and
+    // snapped straight to the top instead of stopping at the row's edge.
+    if (highlightedRow) highlightedRow.scrollIntoView({ block: "nearest" });
   }
 
   function openTrackMenu() {
     // Checks `.playing` though: a deck can still be the selection when it
     // starts playing (selected, then armed with Space) — its menu has to
     // stay closed once it's locked.
-    if (!selectedDeck || selectedDeck.playing) return;
+    if (!selectedDeck || selectedDeck.playing || isRampLocked(selectedDeck)) return;
     menuOpen = true;
     menuHighlightIndex = 0;
     renderTrackMenu();
@@ -1519,8 +1583,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // against the clicked deck being locked (playing), rather than
   // relying on selectDeck's own no-op, so a click on a live deck can't
   // fall through to opening whatever deck was selected before it.
-  deckCanvasWrapA.addEventListener("click", () => { if (slotA.playing) return; selectDeck(slotA); openTrackMenu(); });
-  deckCanvasWrapB.addEventListener("click", () => { if (slotB.playing) return; selectDeck(slotB); openTrackMenu(); });
+  deckCanvasWrapA.addEventListener("click", () => { if (slotA.playing || isRampLocked(slotA)) return; selectDeck(slotA); openTrackMenu(); });
+  deckCanvasWrapB.addEventListener("click", () => { if (slotB.playing || isRampLocked(slotB)) return; selectDeck(slotB); openTrackMenu(); });
 
   // Global pause — like hitting Start on a SNES game: freezes the whole
   // Transport (so every elapsed/bar/phrase calculation, all keyed off
@@ -1529,27 +1593,55 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // nothing continues to sound or ring out underneath the overlay —
   // a true freeze, not just a mute. Resuming un-suspends both and
   // re-syncs clockOffset immediately rather than waiting a frame.
+  // Guards the WHOLE function, both branches — not just the pause
+  // path's own deliberate delay below. Pause and resume both do async
+  // work (context suspend/resume, Transport state changes, the
+  // clockOffset recalculation on resume); a rapid re-press that starts
+  // a second call while the first is still mid-flight lets the two
+  // interleave on the same Transport/nativeCtx, which is exactly what
+  // produced the instant drift and the resume-this-fast-and-it-hangs
+  // reports — the resume in progress gets its clockOffset or Transport
+  // state stomped by a pause starting concurrently, or vice versa.
+  let pauseBusy = false;
   async function togglePause() {
-    if (!slotA || !slotB) return;
-    if (!paused) {
-      paused = true;
-      if (Tone.Transport.state === "started") Tone.Transport.pause();
-      if (nativeCtx.state === "running") await nativeCtx.suspend();
-      pauseOverlay.hidden = false;
-      log("Paused.");
-    } else {
-      paused = false;
-      if (nativeCtx.state === "suspended") await nativeCtx.resume();
-      if (Tone.Transport.state === "paused") Tone.Transport.start();
-      if (Tone.context.state === "running" && nativeCtx.state === "running") {
-        clockOffset = Tone.context.currentTime - nativeCtx.currentTime;
+    if (!slotA || !slotB || pauseBusy) return;
+    pauseBusy = true;
+    try {
+      if (!paused) {
+        paused = true;
+        // Notes are dispatched to the synth up to SCHEDULER_LOOKAHEAD
+        // ahead of when they actually sound (see makeEventScheduler),
+        // so a note can already be mid-flight — committed to the
+        // synth, not cancelable — at the instant Pause is pressed.
+        // Panicking right away loses that race: the already-dispatched
+        // note turns on AFTER the panic, then the freeze below stops
+        // the scheduler before its own "off" is ever reached, leaving
+        // it stuck. Giving the scheduler one more full lookahead window
+        // to run first lets anything already in flight resolve
+        // normally; the panic after that is a backstop for genuinely
+        // still-sustaining notes, not the primary fix.
+        await new Promise((r) => setTimeout(r, SCHEDULER_LOOKAHEAD * 2 * 1000));
+        silenceSynth(slotA);
+        silenceSynth(slotB);
+        if (Tone.Transport.state === "started") Tone.Transport.pause();
+        if (nativeCtx.state === "running") await nativeCtx.suspend();
+        pauseOverlay.hidden = false;
+        log("Paused.");
+      } else {
+        paused = false;
+        if (nativeCtx.state === "suspended") await nativeCtx.resume();
+        if (Tone.Transport.state === "paused") Tone.Transport.start();
+        if (Tone.context.state === "running" && nativeCtx.state === "running") {
+          clockOffset = Tone.context.currentTime - nativeCtx.currentTime;
+        }
+        pauseOverlay.hidden = true;
+        log("Resumed.");
       }
-      pauseOverlay.hidden = true;
-      log("Resumed.");
+    } finally {
+      pauseBusy = false;
     }
   }
-  pauseBtn.addEventListener("click", () => togglePause());
-  pauseOverlay.addEventListener("click", () => togglePause());
+  pauseOverlay.addEventListener("click", () => { if (PAUSE_ENABLED) togglePause(); });
 
   // Theme toggle — the actual data-theme attribute is already set
   // before first paint by the inline script up in <head> (reads
@@ -1575,32 +1667,40 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const tag = document.activeElement && document.activeElement.tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 
-    if (e.key === "p" || e.key === "P") { e.preventDefault(); togglePause(); return; }
+    // SNES-emulator-style layout: A = confirm/open, S = play/go, X = back/
+    // close, Enter = Start (pause) — the d-pad (arrows) stays as-is. P is
+    // kept as a legacy alias for pause alongside Enter.
+    // TEMPORARILY DISABLED while ruling out pause/resume as a source of
+    // the timing issues under investigation — togglePause() itself is
+    // untouched, just unreachable from here. Flip PAUSE_ENABLED back to
+    // restore both this hotkey and the overlay's own click-to-resume.
+    if (PAUSE_ENABLED && (e.key === "p" || e.key === "P" || e.key === "Enter")) { e.preventDefault(); togglePause(); return; }
     if (paused) return; // everything else is frozen until resumed
 
     if (menuOpen) {
       if (e.key === "ArrowUp") { e.preventDefault(); menuHighlightIndex = Math.max(0, menuHighlightIndex - 1); renderTrackMenu(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); menuHighlightIndex = Math.min(binEntries.length - 1, menuHighlightIndex + 1); renderTrackMenu(); }
-      else if (e.key === "Enter") { e.preventDefault(); confirmMenuSelection(); }
-      else if (e.key === "Escape") { e.preventDefault(); closeTrackMenu(); }
+      else if (e.key === "a" || e.key === "A") { e.preventDefault(); confirmMenuSelection(); }
+      else if (e.key === "x" || e.key === "X" || e.key === "Escape") { e.preventDefault(); closeTrackMenu(); }
       return;
     }
 
     if (e.key === "ArrowLeft") { e.preventDefault(); selectDeck(slotA); }
     else if (e.key === "ArrowRight") { e.preventDefault(); selectDeck(slotB); }
-    else if (e.key === "Enter") { e.preventDefault(); openTrackMenu(); }
-    else if (e.key === " " || e.code === "Space") {
+    else if (e.key === "a" || e.key === "A") { e.preventDefault(); openTrackMenu(); }
+    else if (e.key === "s" || e.key === "S" || e.key === " " || e.code === "Space") {
       e.preventDefault();
       // Context-sensitive, like a single "go" button: once a record's
       // loaded-but-silent in the other deck while one is live, that's the
-      // automatic mix to trigger (mixIn's own disabled state already
-      // tracks exactly that condition). Otherwise it's just arming
-      // whichever deck is selected — e.g. starting the very first deck,
-      // when there's nothing yet to mix into. A deck that's already
-      // playing is locked — armDeck no-ops rather than stopping it.
-      if (!mixIn.disabled) mixIn.click();
+      // automatic mix to trigger (mixInAvailable/mixInBusy already track
+      // exactly that condition). Otherwise it's just arming whichever
+      // deck is selected — e.g. starting the very first deck, when
+      // there's nothing yet to mix into. A deck that's already playing
+      // is locked — armDeck no-ops rather than stopping it.
+      if (mixInAvailable && !mixInBusy) triggerBeatmatchMix();
       else if (selectedDeck) armDeck(selectedDeck, selectedDeck === slotA ? "A" : "B");
     }
+    else if (e.key === "Backspace") { e.preventDefault(); stopAllDecks(); }
   });
 
   volA.addEventListener("input", () => {
@@ -1611,23 +1711,95 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     volBval.textContent = `${volB.value}%`;
     if (slotB && slotB.playing && (mixState.phase === "idle" || mixState.phase === "done")) nativeRampTo(slotB.gain.gain, volB.value / 100, 0.08);
   });
-  applyTranspose.addEventListener("click", (e) => {
-    const shift = parseInt(e.target.dataset.shift, 10);
-    const deck = e.target.dataset.targetDeck;
-    const slot = deck === "A" ? slotA : slotB;
-    slot.semitoneShift.value = shift;
-    log(`Applied suggested transpose: Deck ${deck} shifted ${shift >= 0 ? "+" : ""}${shift} semitones to match the other deck's key.`);
-  });
+  // True while a deck is mid-tempo-ramp (see startTempoRamp) — locked
+  // the same way an actually-playing deck is, since it's still mid-
+  // transition and not a stable thing to select/reload/mix from yet.
+  function isRampLocked(slot) {
+    return Tone.Transport.seconds < slot.lockedUntil;
+  }
 
-  mixIn.addEventListener("click", async () => {
+  // Once a mix finishes and `slot` is left playing solo, glide its
+  // effectiveBpm from whatever it was matched to back to its own
+  // native tempo — a few seconds, real-time, not bar-synced (see the
+  // plan this was built from for why: bar-syncing would depend on the
+  // still-unfixed flat-bar-length assumption elsewhere in this file).
+  //
+  // This reuses the exact same retime mechanism mixIn already does
+  // once (dispose the scheduler, rebuild at a new scale, resume from
+  // the deck's current native-time position) — just repeated on a
+  // short timer with a gradually-changing target instead of one jump.
+  // The one real subtlety: unlike every other eventsPart.dispose(),
+  // these swaps do NOT call silenceSynth. buildParts/stopSlot pair
+  // dispose() with a panic because they're discarding the events array
+  // for good; a ramp tick reuses the SAME array every time, so a note
+  // that's already sounding (its "on" fired, its "off" still pending
+  // in `events`) gets picked up correctly by the next scheduler
+  // instance instead of being cut off — silencing here would chop
+  // every sustaining note roughly every 100ms.
+  function startTempoRamp(slot) {
+    const RAMP_DURATION = 4; // seconds
+    const RAMP_STEP = 0.1; // seconds between retime steps
+    const fromBpm = slot.effectiveBpm;
+    const toBpm = slot.bpm;
+    if (Math.abs(toBpm - fromBpm) < 0.05) return;
+
+    const rampStart = Tone.Transport.seconds;
+    slot.lockedUntil = rampStart + RAMP_DURATION;
+
+    const repeatId = Tone.Transport.scheduleRepeat(() => {
+      // Deliberately ignores the `time` argument Tone hands this
+      // callback — that's the raw AudioContext clock (see tick()'s own
+      // comment on makeEventScheduler above), a different clock than
+      // Transport.seconds. Mixing the two here produced a bogus huge
+      // "elapsed" on the very first tick, clamping straight to t=1.
+      // Reading Transport.seconds fresh instead matches how every
+      // other Transport-domain calculation in this file already works
+      // (mixIn's `now`, frame()'s per-frame reads, etc).
+      const now = Tone.Transport.seconds;
+      const elapsed = now - rampStart;
+      const t = Math.min(1, elapsed / RAMP_DURATION);
+
+      // Native position to resume from, computed with the OLD
+      // effectiveBpm/scale — same formula effectiveDuration already
+      // uses, just inverted to go from transport-elapsed back to a
+      // native-time position.
+      const oldEffDur = effectiveDuration(slot);
+      const transportElapsed = mod(now - slot.transportStartOffset, oldEffDur);
+      const nativePos = transportElapsed * (slot.effectiveBpm / slot.bpm);
+
+      slot.effectiveBpm = fromBpm + (toBpm - fromBpm) * t;
+      const newScale = slot.bpm / slot.effectiveBpm;
+
+      if (slot.eventsPart) slot.eventsPart.dispose();
+      slot.eventsPart = makeEventScheduler(slot, slot.events, newScale, slot.duration * newScale);
+      slot.eventsPart.start(now + 0.01, nativePos);
+      slot.transportStartOffset = now - nativePos * newScale;
+
+      if (t >= 1) {
+        Tone.Transport.clear(repeatId);
+        slot.rampCancel = null;
+      }
+    }, RAMP_STEP, rampStart + RAMP_STEP);
+
+    slot.rampCancel = () => {
+      Tone.Transport.clear(repeatId);
+      slot.rampCancel = null;
+    };
+  }
+
+  async function triggerBeatmatchMix() {
     // Guard re-entrancy synchronously, before any await: without this, a
-    // rapid double-click can fire this handler twice before the first call
-    // reaches "mixIn.disabled = true", double-scheduling the whole mix.
-    if (mixIn.disabled || mixState.phase === "armed" || mixState.phase === "crossfading") return;
+    // rapid double-trigger can fire this twice before the first call
+    // reaches "mixInBusy = true", double-scheduling the whole mix.
+    if (mixInBusy || !mixInAvailable || mixState.phase === "armed" || mixState.phase === "crossfading") return;
     const roles = getAnchorIncoming();
     if (!roles || !roles.incoming.midi) return;
-    mixIn.disabled = true;
+    mixInBusy = true;
     const { anchor, incoming } = roles;
+    // A mid-glide anchor needs to hold still to be a stable reference
+    // for the incoming deck — freeze it at whatever it currently reads
+    // rather than letting it keep drifting out from under this mix.
+    if (anchor.rampCancel) anchor.rampCancel();
 
     try {
     await ensureAudio();
@@ -1649,13 +1821,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // Marker Tool — 0, the file's own time zero, otherwise), not
     // Transport-zero — Transport never resets, so every deck after the
     // first one starts partway through it. Find the next boundary
-    // relative to the anchor's own elapsed-since-its-grid-anchor
+    // relative to the anchor's own elapsed-since-its-grid-start
     // position, then convert back to an absolute Transport time.
     const now = Tone.Transport.seconds;
     const elapsedInAnchor = now - anchor.transportStartOffset;
-    const anchorOffset = gridAnchorElapsed(anchor);
-    const elapsedSinceGridAnchor = elapsedInAnchor - anchorOffset;
-    const nextPhraseElapsedSinceAnchor = Math.ceil((elapsedSinceGridAnchor + 0.05) / phraseLenSec) * phraseLenSec;
+    const anchorOffset = gridStartElapsed(anchor);
+    const elapsedSinceGridStart = elapsedInAnchor - anchorOffset;
+    const nextPhraseElapsedSinceAnchor = Math.ceil((elapsedSinceGridStart + 0.05) / phraseLenSec) * phraseLenSec;
     const nextPhraseElapsed = anchorOffset + nextPhraseElapsedSinceAnchor;
     const nextPhrase = anchor.transportStartOffset + nextPhraseElapsed;
 
@@ -1664,7 +1836,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     silenceSynth(incoming);
     const scaledDuration = incoming.duration * scale;
 
-    // Enter at the incoming track's own grid anchor if it has one — the
+    // Enter at the incoming track's own grid start if it has one — the
     // same role a hot cue plays in Traktor: the deck's set begins there,
     // full stop, not at the file's literal start. Nothing before it
     // ever plays (not "catch up" on the skipped part), so there's no
@@ -1672,8 +1844,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // stays the only real scheduling instant, always in the future;
     // incomingFromTime just changes which event the deck's internal
     // clock starts counting from. Falls back to 0 (the file's own
-    // start) when the track has no grid anchor, same as before.
-    const incomingFromTime = incoming.gridAnchor != null ? incoming.gridAnchor : 0;
+    // start) when the track has no grid start, same as before.
+    const incomingFromTime = incoming.gridStart != null ? incoming.gridStart : 0;
     incoming.eventsPart = makeEventScheduler(incoming, events, scale, scaledDuration);
     incoming.eventsPart.start(nextPhrase, incomingFromTime);
 
@@ -1702,10 +1874,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     incoming.effectiveBpm = anchor.effectiveBpm;
     // transportStartOffset is "the transport time native-time-zero would
     // land at" — every other formula (elapsed/bar readout, chained-mix
-    // math, gridAnchorElapsed) assumes that, even though native-time-
+    // math, gridStartElapsed) assumes that, even though native-time-
     // zero itself is never actually played when entering via a grid
     // anchor. Shifting it back by the (scaled) anchor offset keeps all
-    // of that consistent: gridAnchorElapsed(incoming) lands exactly on
+    // of that consistent: gridStartElapsed(incoming) lands exactly on
     // nextPhrase, same as the anchor's own point lands on-screen.
     incoming.transportStartOffset = nextPhrase - incomingFromTime * scale;
     mixState.phase = "armed";
@@ -1716,7 +1888,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     updateLiveBadges();
 
     const barNum = Math.round(nextPhraseElapsedSinceAnchor / barLen) + 1;
-    const entryDesc = incomingFromTime > 0 ? `its grid anchor (skipping its first ${incomingFromTime.toFixed(1)}s)` : "its own downbeat";
+    const entryDesc = incomingFromTime > 0 ? `its grid start (skipping its first ${incomingFromTime.toFixed(1)}s)` : "its own downbeat";
     log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter at ${entryDesc} at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
 
     Tone.Transport.scheduleOnce(() => {
@@ -1732,14 +1904,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         clearDeck(anchor, anchorWhich);
         selectDeck(anchor);
         mixState.phase = "done";
-        mixStateEl.textContent = `Done — Deck ${anchor.name} faded out and stopped. Deck ${incoming.name} is now live. Load a fresh record into Deck ${anchor.name} to keep the set going.`;
-        mixIn.disabled = false;
+        mixInBusy = false;
         updateLiveBadges();
         refreshMixInAvailability();
-        log(`Crossfade complete. Deck ${anchor.name} stopped; Deck ${incoming.name} continues solo.`);
+        startTempoRamp(incoming);
+        log(`Crossfade complete. Deck ${anchor.name} stopped; Deck ${incoming.name} continues solo${incoming.effectiveBpm !== incoming.bpm ? `, gliding back to its native ${incoming.bpm.toFixed(1)} BPM` : ""}.`);
       } catch (err) {
         log(`Error finishing the crossfade: ${errText(err)}`);
-        mixIn.disabled = false;
+        mixInBusy = false;
       }
     }, nextPhrase + overlapSec + 0.02);
     } catch (err) {
@@ -1747,23 +1919,21 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       mixState.phase = "idle";
       mixState.anchor = null;
       mixState.incoming = null;
-      mixStateEl.textContent = "Something went wrong starting the mix — see the log below. Try again.";
-      mixIn.disabled = false;
+      mixInBusy = false;
       refreshMixInAvailability();
     }
-  });
+  }
 
-  stopAllBtn.addEventListener("click", () => {
+  function stopAllDecks() {
     stopSlot(slotA);
     stopSlot(slotB);
     mixState.phase = "idle";
     mixState.anchor = null;
     mixState.incoming = null;
-    mixStateEl.textContent = "Idle. Arm a deck to start the set, load a record into the other deck, then trigger Beatmatch Mix.";
     updateLiveBadges();
     refreshMixInAvailability();
     log("Stopped all decks.");
-  });
+  }
 
   function updateAndDrawDeck(slot, otherSlot, canvas, ctx, remEl, elEl, triggerElapsed, overlapStart, overlapWidth) {
     if (slot.midi && slot.duration > 0) {
@@ -1774,16 +1944,22 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       // parked instead of silently scrolling along with whatever's live
       // on the other deck. Parked WHERE depends on how it'll actually
       // start: if the other deck is already live, this one is set up to
-      // mix in at its own grid anchor (same hot-cue-style entry mixIn
+      // mix in at its own grid start (same hot-cue-style entry mixIn
       // uses) rather than the file's literal start, so preview it
       // there. Otherwise (nothing live yet — the first deck of a set)
       // it'll start with plain Play, from the file's own beginning.
       const elapsed = slot.playing
         ? mod(Tone.Transport.seconds - slot.transportStartOffset, effDur)
-        : (otherSlot.playing ? gridAnchorElapsed(slot) : 0);
+        : (otherSlot.playing ? gridStartElapsed(slot) : 0);
       remEl.textContent = "−" + formatClock(effDur - elapsed);
       elEl.textContent = "+" + formatClock(elapsed);
-      drawDeckCanvas(slot, canvas, ctx, elapsed, effDur, triggerElapsed, overlapStart, overlapWidth);
+      // The canvas should show what's actually audible right now, not the
+      // instant the audio graph is scheduling — only matters while actually
+      // playing (a parked deck isn't making sound, so nothing to correct
+      // for). Only the drawing shifts; the mm:ss readouts above and the
+      // mix-trigger math in frame() stay on the precise scheduling clock.
+      const visualElapsed = slot.playing ? elapsed - outputLatencySeconds() : elapsed;
+      drawDeckCanvas(slot, canvas, ctx, visualElapsed, effDur, triggerElapsed, overlapStart, overlapWidth);
     } else {
       remEl.textContent = "−0:00";
       elEl.textContent = "+0:00";
@@ -1809,6 +1985,16 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const xfaderPos = totalGain > 0.0001 ? slotB.gain.gain.value / totalGain : 0.5;
     crossfaderHandle.style.left = (xfaderPos * 100) + "%";
 
+    // Whichever deck is currently driving the set — during an active
+    // mix that's the anchor (both sides are already tempo-matched by
+    // then), otherwise whichever single deck is actually playing. Re-
+    // read every frame so a tempo ramp (see startTempoRamp) shows up
+    // as a smoothly ticking number, not a discrete jump.
+    const liveDeck = (mixState.phase === "armed" || mixState.phase === "crossfading")
+      ? mixState.anchor
+      : (slotA.playing ? slotA : (slotB.playing ? slotB : null));
+    masterTempoEl.textContent = liveDeck ? `${liveDeck.effectiveBpm.toFixed(1)} BPM` : "❤️ --.- BPM";
+
     // Trigger/overlap overlays only ever apply to whichever deck is
     // currently the mix anchor — computed once here, in TRANSPORT-
     // elapsed seconds (the same basis drawDeckCanvas's own `elapsed`
@@ -1821,10 +2007,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       if (remaining <= 0) {
         mixState.phase = "crossfading";
       } else {
-        const anchorBarLen = effectiveBarLen(anchor);
         const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
-        const barNum = Math.round((nextPhraseElapsed - gridAnchorElapsed(anchor)) / anchorBarLen) + 1;
-        mixStateEl.textContent = `Armed — waiting for the next phrase boundary (bar ${barNum} of Deck ${anchor.name}) in ${remaining.toFixed(1)}s.`;
         if (anchor.duration > 0) {
           const effDur = effectiveDuration(anchor);
           triggerElapsed = mod(nextPhraseElapsed, effDur);
@@ -1833,9 +2016,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     } else if (mixState.phase === "crossfading") {
       const anchor = mixState.anchor, incoming = mixState.incoming;
       mixAnchor = anchor;
-      const elapsed = Tone.Transport.seconds - mixState.nextPhrase;
-      const pct = Math.min(100, Math.round(elapsed / mixState.overlapSec * 100));
-      mixStateEl.textContent = `Crossfading… ${pct}% — Deck ${incoming.name} fading in, Deck ${anchor.name} fading out.`;
       if (anchor.duration > 0) {
         const effDur = effectiveDuration(anchor);
         const nextPhraseElapsed = mixState.nextPhrase - anchor.transportStartOffset;
@@ -1855,8 +2035,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // playing deck's button is disabled here too — locked, same as the
     // keyboard side — so it can only ever be armed, never stopped,
     // through this control.
-    setToggleIcon(toggleIconA, slotA.playing);
-    setToggleIcon(toggleIconB, slotB.playing);
+    setToggleIcon(toggleSvgA, deckPlayareaA, slotA.playing);
+    setToggleIcon(toggleSvgB, deckPlayareaB, slotB.playing);
     toggleA.disabled = !slotA.midi || slotA.playing;
     toggleB.disabled = !slotB.midi || slotB.playing;
 
@@ -1865,9 +2045,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // mix's incoming side), so the selection has to be swept off it
     // here too, not just refused at selectDeck()/openTrackMenu() time.
     // Moves to the other deck if that one's free, else just clears.
-    if (selectedDeck && selectedDeck.playing) {
+    if (selectedDeck && (selectedDeck.playing || isRampLocked(selectedDeck))) {
       const other = selectedDeck === slotA ? slotB : slotA;
-      selectedDeck = other.playing ? null : other;
+      selectedDeck = (other.playing || isRampLocked(other)) ? null : other;
       renderSelection();
     }
 
