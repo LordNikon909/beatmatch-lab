@@ -1915,11 +1915,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   });
 
   // Game controller (Bluetooth or USB) via the browser's Gamepad API,
-  // polled once per frame from frame(). Buttons are by position in the
-  // "standard" layout (Xbox labels): A = bottom, B = right, Y = top — so
-  // on a Nintendo-style pad, where the printed letters are swapped, these
-  // are the buttons in the same spots. No stop-all button on purpose.
-  const PAD_ACTIONS = { 0: "confirm", 1: "back", 3: "go", 12: "up", 13: "down", 14: "left", 15: "right" };
+  // polled once per frame from frame(). The browser reports face buttons
+  // by position, not printed letter; this follows Nintendo-style labels
+  // (8BitDo): right = A confirm, bottom = B close, left = Y arm/mix, top
+  // (X) unused. On an Xbox-labeled pad the letters won't match. No
+  // stop-all button on purpose.
+  const PAD_ACTIONS = { 1: "confirm", 0: "back", 2: "go", 12: "up", 13: "down", 14: "left", 15: "right" };
   const padPrevPressed = new Map(); // gamepad index -> last frame's pressed flags
   function pollGamepads() {
     if (!navigator.getGamepads) return;
