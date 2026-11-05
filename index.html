@@ -852,6 +852,20 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     for (let ch = 0; ch < 16; ch++) {
       slot.synth.controllerChange(ch, 123, 0, { time: now });
     }
+    // All Notes Off only reaches voices already sounding. A scheduler hands
+    // the synth notes up to ~150ms ahead, so a note-on queued for just after
+    // `now` still starts AFTER this panic — and its note-off was never sent,
+    // so it rings indefinitely (heard as a hang once that deck's volume comes
+    // up, e.g. the incoming deck of a mix). Release each of those right after
+    // it starts. Targeted per key rather than a second delayed panic, so it
+    // can't cut off whatever the next scheduler starts on this synth.
+    for (const [key, onAt] of slot.queuedOns) {
+      if (onAt > now) {
+        const [ch, note] = key.split(":").map(Number);
+        slot.synth.noteOff(ch, note, { time: onAt + 0.002 });
+      }
+    }
+    slot.queuedOns.clear();
   }
 
   // Our own lightweight replacement for scheduling a deck's bulk
@@ -932,6 +946,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         // backward re-scan is about to re-encounter — can be told apart
         // from this note's own proper "off" still to come.
         slot.rampLastOnTime.set(ev.channel + ":" + note, ev.time);
+        slot.queuedOns.set(ev.channel + ":" + note, nt); // see silenceSynth
       } else {
         const key = ev.channel + ":" + note;
         const newerOn = slot.rampLastOnTime.get(key);
@@ -940,6 +955,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         // this is this note's own ordinary release and must still fire.
         if (newerOn === undefined || newerOn <= ev.time) {
           slot.synth.noteOff(ev.channel, note, { time: nt });
+          const queuedAt = slot.queuedOns.get(key);
+          if (queuedAt !== undefined && nt >= queuedAt) slot.queuedOns.delete(key);
         }
       }
       slot.rampFiredThisLap.add(ev);
@@ -1092,6 +1109,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       // lets the stranded-note sweep tell a stale pending "off" apart
       // from one that still belongs to what's currently sounding.
       rampLastOnTime: new Map(),
+      // "channel:note" -> native start time of each note-on handed to the
+      // synth whose note-off hasn't been sent yet (see silenceSynth).
+      queuedOns: new Map(),
     };
   }
 
