@@ -112,9 +112,13 @@ body {
   align-items: center;
   gap: 8px;
   box-shadow: 0 0 0 0 transparent;
-  transition: box-shadow 0.15s ease;
+  border-left: solid #ccc 4px;
+  border-top: solid #ccc 4px;
+  border-right: solid #ccc 4px;
+  position: relative;
+  z-index: 1;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
-.deck.selected .deck-pillbar, .deck.selected .deck-player { background: var(--accent-b); }
 .deck-pill {
   background: #2B2B2B; color: #fff;
   font-family: var(--font-ui); font-size: 16px; font-weight: 700;
@@ -127,7 +131,22 @@ body {
   padding: 10px;
   display: flex;
   gap: 0;
-  transition: box-shadow 0.15s ease;
+  border: solid #ccc 4px;
+  /* Pulled up by exactly the border width, with the pillbar sitting one
+     z-index above (so it renders on top) — the player's own new top
+     border tucks underneath the pillbar inside that 4px of overlap,
+     instead of showing as a visible seam where the two pieces meet. */
+  margin-top: -4px;
+  position: relative;
+  z-index: 0;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+/* Selected keeps the existing solid blue fill, plus the same 4px border
+   in a lighter tint of --accent-b so it still reads as an outline
+   against the now-solid-blue background. */
+.deck.selected .deck-pillbar, .deck.selected .deck-player {
+  background: var(--accent-b);
+  border-color: #9fe6ff;
 }
 
 /* The play/arm button sits in its own inset area, left of the screen —
@@ -343,11 +362,29 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   padding: 10px 12px; height: 130px; overflow-y: auto; white-space: pre-wrap;
 }
 .hint { font-size: 12px; color: var(--fg-dim); line-height: 1.5; }
+.keybind-legend {
+  display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 14px;
+  padding-top: 14px; border-top: 1px solid var(--line);
+}
+.keybind-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--fg-dim); }
+.keybind-row kbd {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  background: var(--panel-raised); color: var(--fg); border-radius: 4px;
+  padding: 2px 6px; border: 1px solid var(--line); min-width: 1.3em; text-align: center;
+}
+.debug-stats {
+  position: fixed; bottom: 10px; right: 10px; z-index: 50;
+  background: rgba(0, 0, 0, 0.75); color: #8fe88f; font-family: var(--mono);
+  font-size: 10.5px; line-height: 1.6; padding: 8px 10px; border-radius: 8px;
+  white-space: pre; pointer-events: none; opacity: 0.85;
+}
 </style>
 
 <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark/light theme">
   <svg viewBox="0 0 24 24"><path id="themeToggleIcon"></path></svg>
 </button>
+
+<div class="debug-stats" id="debugStats"></div>
 
 <div class="wrap">
   <div class="log" id="log"></div>
@@ -456,6 +493,14 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
       </div>
     </div>
 
+    <div class="keybind-legend">
+      <div class="keybind-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Select deck A / B</span></div>
+      <div class="keybind-row"><kbd>A</kbd><span>Open menu / confirm track</span></div>
+      <div class="keybind-row"><kbd>S</kbd><kbd>Space</kbd><span>Arm deck / trigger mix</span></div>
+      <div class="keybind-row"><kbd>X</kbd><kbd>Esc</kbd><span>Close menu</span></div>
+      <div class="keybind-row"><kbd>&uarr;</kbd><kbd>&darr;</kbd><span>Browse menu</span></div>
+      <div class="keybind-row"><kbd>Backspace</kbd><span>Stop all decks</span></div>
+    </div>
   </div>
 </div>
 
@@ -487,6 +532,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   "use strict";
 
   const logEl = document.getElementById("log");
+  const debugStatsEl = document.getElementById("debugStats");
   function log(msg) {
     const t = new Date().toLocaleTimeString([], { hour12: false });
     logEl.textContent += `[${t}] ${msg}\n`;
@@ -526,6 +572,33 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
   function toNativeTime(toneTime) {
     return toneTime - clockOffset;
+  }
+
+  // Live diagnostics for the on-page debug readout (see #debugStats /
+  // frame()) — not used by any scheduling or audio-timing logic itself,
+  // purely observational. dispatchMargin is how much lead time a note
+  // had, in native seconds, between being handed to the synth and its
+  // scheduled sound time: positive means it was dispatched with that much
+  // runway to spare (normal), zero/negative means the main thread was too
+  // busy to dispatch it before its own deadline and it just played late.
+  // worstDispatchMargin tracks the minimum seen since it was last reset,
+  // decaying back toward "no data" every few seconds so it reflects
+  // recent behavior, not a one-time fluke from minutes ago.
+  const perfStats = {
+    lastDispatchMargin: null, worstDispatchMargin: null, worstSince: 0,
+    lastFrameMs: 0, worstFrameMs: null, worstFrameSince: 0,
+  };
+  let lastFrameTime = performance.now();
+  function recordDispatchMargin(nt) {
+    const margin = nt - nativeCtx.currentTime;
+    perfStats.lastDispatchMargin = margin;
+    const now = performance.now();
+    if (perfStats.worstDispatchMargin === null || now - perfStats.worstSince > 5000) {
+      perfStats.worstDispatchMargin = margin;
+      perfStats.worstSince = now;
+    } else if (margin < perfStats.worstDispatchMargin) {
+      perfStats.worstDispatchMargin = margin;
+    }
   }
   function nativeRampTo(gainParam, target, duration) {
     const now = nativeCtx.currentTime;
@@ -831,11 +904,42 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     let fromTime = 0;
     let firstLapLen = loopEnd;
 
+    // Dispatches one event to the synth — except during startTempoRamp's
+    // swaps (see .start() below), where this is the ONLY gate standing
+    // between a deck and firing the same note twice. A swap disposes the
+    // running scheduler and starts a fresh instance on the SAME `events`
+    // array every ~0.1s; the new instance can't know exactly how far the
+    // old one's own tick()/fire() calls had already reached in its brief
+    // life (its lookahead window moves every tick, not just once), so
+    // rather than try to compute a provably-safe resume index, the new
+    // instance deliberately re-scans slightly backward and lets this
+    // check skip anything already sent — same mechanism whether an event
+    // turns out to be a genuine duplicate OR a genuinely stranded one
+    // (the latter just hasn't hit this check before, so it passes).
     function fire(ev, fireAtToneTime) {
+      if (slot.rampFiredThisLap.has(ev)) return;
       const nt = toNativeTime(fireAtToneTime);
+      recordDispatchMargin(nt);
       const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
-      if (ev.type === "on") slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
-      else slot.synth.noteOff(ev.channel, note, { time: nt });
+      if (ev.type === "on") {
+        slot.synth.noteOn(ev.channel, note, Math.max(1, Math.round(ev.velocity * 127)), { time: nt });
+        // A (channel,note) pair only addresses one voice on a real synth.
+        // Record when this voice was last (re)claimed so a stale pending
+        // "off" for an OLDER instance of the same pair — one a swap's
+        // backward re-scan is about to re-encounter — can be told apart
+        // from this note's own proper "off" still to come.
+        slot.rampLastOnTime.set(ev.channel + ":" + note, ev.time);
+      } else {
+        const key = ev.channel + ":" + note;
+        const newerOn = slot.rampLastOnTime.get(key);
+        // Only suppress when a newer claim truly supersedes this "off" —
+        // i.e. it arrived after this event's own nominal time. Otherwise
+        // this is this note's own ordinary release and must still fire.
+        if (newerOn === undefined || newerOn <= ev.time) {
+          slot.synth.noteOff(ev.channel, note, { time: nt });
+        }
+      }
+      slot.rampFiredThisLap.add(ev);
     }
 
     function elapsedFor(ev) {
@@ -863,7 +967,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       const windowEnd = (time - startAtContext) + LOOKAHEAD;
       let guard = 0;
       while (guard++ <= events.length) {
-        if (idx >= events.length) { idx = 0; loopsElapsed++; }
+        if (idx >= events.length) {
+          idx = 0;
+          loopsElapsed++;
+          // New lap: every event object is about to be reused for a
+          // fresh pass, so last lap's dispatched-marks no longer apply.
+          slot.rampFiredThisLap = new Set();
+          slot.rampLastOnTime = new Map();
+        }
         const ev = events[idx];
         const evElapsed = elapsedFor(ev);
         if (evElapsed > windowEnd) break;
@@ -874,32 +985,36 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
     return {
       get state() { return repeatId !== null ? "started" : "stopped"; },
-      start(at, startFromTime) {
+      start(at, startFromTime, opts) {
         if (repeatId !== null) return;
         fromTime = startFromTime || 0;
-        idx = lowerBoundByTime(events, fromTime);
-        // A note whose "on" a PRIOR scheduler instance already fired —
-        // dispatched via its own LOOKAHEAD margin, right before being
-        // disposed — can have its "off" land just behind `fromTime` by
-        // the time this new instance starts, purely from how much real
-        // time passed in between. idx above would silently skip that
-        // "off" (its time is < fromTime), leaving the note stuck
-        // sounding forever with nothing left to ever release it. Only
-        // startTempoRamp's repeated same-events() swaps hit this in
-        // practice — every other dispose() pairs with silenceSynth()
-        // instead — but there it's frequent: 40 swaps over one glide,
-        // each a fresh chance to strand a short note like a kick or
-        // hi-hat. Sweep one lookahead window further back than idx and
-        // release anything still pending there directly, bypassing the
-        // normal scheduled-fire path since it's already overdue; a
-        // redundant noteOff on an already-released note is a no-op, so
-        // this is safe even in the ordinary, non-stranded case.
-        const strandedFrom = lowerBoundByTime(events, Math.max(0, fromTime - SCHEDULER_LOOKAHEAD * 2));
-        for (let i = strandedFrom; i < idx; i++) {
-          const ev = events[i];
-          if (ev.type !== "off") continue;
-          const note = ev.channel === 9 ? ev.midi : clampNote(ev.midi + slot.semitoneShift.value);
-          slot.synth.noteOff(ev.channel, note, { time: nativeCtx.currentTime });
+        if (opts && opts.isSwap) {
+          // Swapping a running scheduler for a new one on the SAME events
+          // array (startTempoRamp's repeated retime, every ~0.1s) — not a
+          // genuinely fresh start, a mid-stream continuation. The OLD
+          // instance's own tick()/fire() calls may have already reached
+          // somewhat past `fromTime` in its brief ~0.1s life (its own
+          // lookahead window moves forward with every one of its ticks,
+          // not just once), and separately, a note whose "on" it fired
+          // can have its "off" still sitting un-fired if the old instance
+          // was disposed before reaching it — left alone, that note gets
+          // stuck sounding forever. Rather than compute a provably-exact
+          // resume point for either case, start scanning from a bit
+          // before `fromTime` and let fire()'s own rampFiredThisLap check
+          // silently skip anything the old instance already sent — one
+          // mechanism covers both a genuine resend and a genuinely
+          // stranded note, since a stranded one just hasn't hit that
+          // check yet and passes through normally.
+          idx = lowerBoundByTime(events, Math.max(0, fromTime - SCHEDULER_LOOKAHEAD * 2));
+        } else {
+          // A genuinely fresh start (new track, new mix entry) has no
+          // earlier instance to have claimed anything — start exactly at
+          // the entry point, and begin a clean dispatch history, since
+          // old marks (even on the same array object, re-looping) don't
+          // apply to this new playback segment.
+          idx = lowerBoundByTime(events, fromTime);
+          slot.rampFiredThisLap = new Set();
+          slot.rampLastOnTime = new Map();
         }
         loopsElapsed = 0;
         firstLapLen = loopEnd - fromTime * timeScale;
@@ -965,6 +1080,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       // the ramp's repeating tick (null when no ramp is in flight).
       lockedUntil: 0,
       rampCancel: null,
+      // Event objects (from `events`, by identity) already dispatched
+      // to the synth this lap — see fire() and .start()'s stranded-note
+      // sweep in makeEventScheduler. Only meaningfully consulted across
+      // startTempoRamp's swaps; reset on a fresh start or a loop wrap.
+      rampFiredThisLap: new Set(),
+      // Latest "on" ev.time fired per "channel:note" voice this lap —
+      // lets the stranded-note sweep tell a stale pending "off" apart
+      // from one that still belongs to what's currently sounding.
+      rampLastOnTime: new Map(),
     };
   }
 
@@ -977,6 +1101,39 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   masterCompressor.attack.value = 0.001;
   masterCompressor.release.value = 0.1;
   masterCompressor.connect(nativeCtx.destination);
+
+  // UI sound effects — short one-shot menu-navigation/deck-arm stings,
+  // straight to nativeCtx.destination on their own gain rather than
+  // through masterCompressor, since that bus is tuned for the music's
+  // dynamics, not a crisp UI transient. Fetched and decoded once at
+  // startup; a buffer that fails to load just means that cue stays
+  // silent (playSfx no-ops on a missing buffer) rather than breaking
+  // anything else.
+  const sfxGain = nativeCtx.createGain();
+  sfxGain.gain.value = 0.7;
+  sfxGain.connect(nativeCtx.destination);
+  const sfxBuffers = {};
+  async function loadSfx(name, url) {
+    try {
+      const res = await fetch(url);
+      const arrayBuf = await res.arrayBuffer();
+      sfxBuffers[name] = await nativeCtx.decodeAudioData(arrayBuf);
+    } catch (err) {
+      console.warn(`Couldn't load SFX "${name}" (${url}):`, err);
+    }
+  }
+  function playSfx(name) {
+    const buffer = sfxBuffers[name];
+    if (!buffer) return;
+    if (nativeCtx.state !== "running") nativeCtx.resume();
+    const src = nativeCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(sfxGain);
+    src.start();
+  }
+  loadSfx("menuIn", "wavs/deck_ui_side_menu_fly_in.wav");
+  loadSfx("menuOut", "wavs/deck_ui_side_menu_fly_out.wav");
+  loadSfx("armStab", "wavs/powerful_stab_that_s_%234-1793821868127.wav");
 
   // Reverb + chorus, as parallel sends on top of the dry signal (same
   // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
@@ -1249,7 +1406,21 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const phraseStart = gridStartTransport + phraseStartBar * barLen;
     const phraseEnd = phraseStart + phraseLenBars * barLen;
     ctx.fillStyle = "rgba(33, 219, 148, 0.18)";
-    ctx.fillRect(xFor(phraseStart), 0, xFor(phraseEnd) - xFor(phraseStart), h);
+    if (overlapStart !== null) {
+      // Mid-mix, the overlap zone (drawn in blue further below, untouched)
+      // takes over for whatever portion of the current phrase it covers —
+      // green and blue stacking as translucent layers read as a muddy
+      // teal, not as "blue during the mix." Just draw green around it.
+      const ovStart = overlapStart, ovEnd = overlapStart + overlapWidth;
+      if (ovEnd <= phraseStart || ovStart >= phraseEnd) {
+        ctx.fillRect(xFor(phraseStart), 0, xFor(phraseEnd) - xFor(phraseStart), h);
+      } else {
+        if (ovStart > phraseStart) ctx.fillRect(xFor(phraseStart), 0, xFor(ovStart) - xFor(phraseStart), h);
+        if (ovEnd < phraseEnd) ctx.fillRect(xFor(ovEnd), 0, xFor(phraseEnd) - xFor(ovEnd), h);
+      }
+    } else {
+      ctx.fillRect(xFor(phraseStart), 0, xFor(phraseEnd) - xFor(phraseStart), h);
+    }
 
     let bar = Math.floor((viewStart - gridStartTransport) / barLen) - 1;
     for (;;) {
@@ -1445,6 +1616,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   async function armDeck(slot, which) {
     if (!slot.midi || slot.playing) return;
+    playSfx("armStab");
     const volSlider = which === "A" ? volA : volB;
     await ensureAudio();
     playSlot(slot, volSlider.value);
@@ -1558,6 +1730,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // starts playing (selected, then armed with Space) — its menu has to
     // stay closed once it's locked.
     if (!selectedDeck || selectedDeck.playing || isRampLocked(selectedDeck)) return;
+    playSfx("menuIn");
     menuOpen = true;
     menuHighlightIndex = 0;
     renderTrackMenu();
@@ -1575,7 +1748,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     closeTrackMenu();
   }
   trackMenuBackdrop.addEventListener("click", (e) => {
-    if (e.target === trackMenuBackdrop) closeTrackMenu();
+    if (e.target === trackMenuBackdrop) { playSfx("menuOut"); closeTrackMenu(); }
   });
 
   // Clicking a deck's canvas also selects it and opens its menu — the
@@ -1678,15 +1851,35 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (paused) return; // everything else is frozen until resumed
 
     if (menuOpen) {
-      if (e.key === "ArrowUp") { e.preventDefault(); menuHighlightIndex = Math.max(0, menuHighlightIndex - 1); renderTrackMenu(); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); menuHighlightIndex = Math.min(binEntries.length - 1, menuHighlightIndex + 1); renderTrackMenu(); }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = Math.max(0, menuHighlightIndex - 1);
+        if (next !== menuHighlightIndex) playSfx("menuIn");
+        menuHighlightIndex = next;
+        renderTrackMenu();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = Math.min(binEntries.length - 1, menuHighlightIndex + 1);
+        if (next !== menuHighlightIndex) playSfx("menuIn");
+        menuHighlightIndex = next;
+        renderTrackMenu();
+      }
       else if (e.key === "a" || e.key === "A") { e.preventDefault(); confirmMenuSelection(); }
-      else if (e.key === "x" || e.key === "X" || e.key === "Escape") { e.preventDefault(); closeTrackMenu(); }
+      else if (e.key === "x" || e.key === "X" || e.key === "Escape") { e.preventDefault(); playSfx("menuOut"); closeTrackMenu(); }
       return;
     }
 
-    if (e.key === "ArrowLeft") { e.preventDefault(); selectDeck(slotA); }
-    else if (e.key === "ArrowRight") { e.preventDefault(); selectDeck(slotB); }
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      const prevSelected = selectedDeck;
+      selectDeck(slotA);
+      if (selectedDeck !== prevSelected) playSfx("menuIn");
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      const prevSelected = selectedDeck;
+      selectDeck(slotB);
+      if (selectedDeck !== prevSelected) playSfx("menuIn");
+    }
     else if (e.key === "a" || e.key === "A") { e.preventDefault(); openTrackMenu(); }
     else if (e.key === "s" || e.key === "S" || e.key === " " || e.code === "Space") {
       e.preventDefault();
@@ -1772,7 +1965,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
       if (slot.eventsPart) slot.eventsPart.dispose();
       slot.eventsPart = makeEventScheduler(slot, slot.events, newScale, slot.duration * newScale);
-      slot.eventsPart.start(now + 0.01, nativePos);
+      slot.eventsPart.start(now + 0.01, nativePos, { isSwap: true });
       slot.transportStartOffset = now - nativePos * newScale;
 
       if (t >= 1) {
@@ -1969,6 +2162,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   function frame() {
     if (!slotA || !slotB) { requestAnimationFrame(frame); return; }
+    const nowPerf = performance.now();
+    perfStats.lastFrameMs = nowPerf - lastFrameTime;
+    lastFrameTime = nowPerf;
+    if (perfStats.worstFrameMs === null || nowPerf - perfStats.worstFrameSince > 5000) {
+      perfStats.worstFrameMs = perfStats.lastFrameMs;
+      perfStats.worstFrameSince = nowPerf;
+    } else if (perfStats.lastFrameMs > perfStats.worstFrameMs) {
+      perfStats.worstFrameMs = perfStats.lastFrameMs;
+    }
     // Two independent AudioContexts don't necessarily run at exactly the
     // same real rate — measured clockOffset drifting by several hundred
     // ms over a few minutes when it was only refreshed once per
@@ -2000,6 +2202,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // elapsed seconds (the same basis drawDeckCanvas's own `elapsed`
     // is in, so no conversion needed when handed to it below).
     let mixAnchor = null, triggerElapsed = null, overlapStart = null, overlapWidth = null;
+    let incomingOverlapStart = null, incomingOverlapWidth = null;
     if (mixState.phase === "armed") {
       const anchor = mixState.anchor;
       mixAnchor = anchor;
@@ -2022,12 +2225,29 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         overlapStart = mod(nextPhraseElapsed, effDur);
         overlapWidth = Math.min(effDur - overlapStart, mixState.overlapSec);
       }
+      // Mirror the same window onto the incoming deck's own timeline, so
+      // both decks shade blue together instead of just the anchor — same
+      // real-time span [nextPhrase, nextPhrase+overlapSec], just expressed
+      // in the incoming deck's own elapsed-since-its-start basis instead
+      // of the anchor's.
+      if (incoming.duration > 0) {
+        const incomingEffDur = effectiveDuration(incoming);
+        const incomingNextPhraseElapsed = mixState.nextPhrase - incoming.transportStartOffset;
+        incomingOverlapStart = mod(incomingNextPhraseElapsed, incomingEffDur);
+        incomingOverlapWidth = Math.min(incomingEffDur - incomingOverlapStart, mixState.overlapSec);
+      }
     }
 
+    const overlapFor = (slot) => slot === mixAnchor ? [overlapStart, overlapWidth]
+      : slot === mixState.incoming ? [incomingOverlapStart, incomingOverlapWidth]
+      : [null, null];
+    const [overlapStartA, overlapWidthA] = overlapFor(slotA);
+    const [overlapStartB, overlapWidthB] = overlapFor(slotB);
+
     updateAndDrawDeck(slotA, slotB, phraseCanvasA, phraseCtxA, timeRemainingElA, timeElapsedElA,
-      mixAnchor === slotA ? triggerElapsed : null, mixAnchor === slotA ? overlapStart : null, mixAnchor === slotA ? overlapWidth : null);
+      mixAnchor === slotA ? triggerElapsed : null, overlapStartA, overlapWidthA);
     updateAndDrawDeck(slotB, slotA, phraseCanvasB, phraseCtxB, timeRemainingElB, timeElapsedElB,
-      mixAnchor === slotB ? triggerElapsed : null, mixAnchor === slotB ? overlapStart : null, mixAnchor === slotB ? overlapWidth : null);
+      mixAnchor === slotB ? triggerElapsed : null, overlapStartB, overlapWidthB);
 
     // Driven by state every frame, not just on click — the mix anchor
     // stops (and the incoming deck starts) directly inside mixIn, not
@@ -2049,6 +2269,21 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       const other = selectedDeck === slotA ? slotB : slotA;
       selectedDeck = (other.playing || isRampLocked(other)) ? null : other;
       renderSelection();
+    }
+
+    if (debugStatsEl) {
+      const rawOut = nativeCtx.outputLatency;
+      const rawOutMs = typeof rawOut === "number" ? (rawOut * 1000).toFixed(1) + "ms" : "n/a";
+      const baseMs = (nativeCtx.baseLatency * 1000).toFixed(1) + "ms";
+      const usedMs = (outputLatencySeconds() * 1000).toFixed(1) + "ms";
+      const dm = perfStats.lastDispatchMargin;
+      const dmw = perfStats.worstDispatchMargin;
+      debugStatsEl.textContent =
+        `output latency: ${usedMs} used (raw ${rawOutMs}, base ${baseMs})\n` +
+        `clock offset: ${(clockOffset * 1000).toFixed(1)}ms\n` +
+        `audio state: tone=${Tone.context.state} native=${nativeCtx.state}\n` +
+        `dispatch margin: last ${dm != null ? (dm * 1000).toFixed(1) + "ms" : "—"}, worst/5s ${dmw != null ? (dmw * 1000).toFixed(1) + "ms" : "—"}\n` +
+        `frame time: ${perfStats.lastFrameMs.toFixed(1)}ms, worst/5s ${perfStats.worstFrameMs != null ? perfStats.worstFrameMs.toFixed(1) + "ms" : "—"}`;
     }
 
     requestAnimationFrame(frame);
