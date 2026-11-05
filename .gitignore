@@ -5,17 +5,12 @@
 # never committed, regardless of format.
 soundfonts/
 
-# Any subfolder of midis/ is scratch/source material (raw files, dated
-# working batches) for producing the *_marked.mid files that actually ship
-# at the top level of midis/; the app's preload only scans that top level.
-midis/*/
+# Scratch/working folders. What the app actually loads lives in tracks/
+# (MIDI) and sfx/ (sound effects) — move finished files there to ship them.
+midis/
+wavs/
 
 # Reference material and local tooling — not part of the app.
 Reference Assets/
 Design/
 .claude/
-
-# Ableton analysis files and project folders from making SFX in wavs/
-# (the .wav files themselves are loaded by the app and stay tracked).
-*.asd
-wavs/*Project/

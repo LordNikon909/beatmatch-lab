@@ -18,12 +18,14 @@ and open `http://localhost:8000/index.html`.
 
 ## The record bin
 
-**Running locally** (any server that serves directory listings, like `python3 -m http.server`): just drop `.mid`/`.midi` files into `midis/` and reload the page. On startup it reads the `midis/` directory listing directly and preloads whatever's there — no build step, no regeneration, no restart.
+**Running locally** (any server that serves directory listings, like `python3 -m http.server`): just drop `.mid`/`.midi` files into `tracks/` and reload the page. On startup it reads the `tracks/` directory listing directly and preloads whatever's there — no build step, no regeneration, no restart.
 
-**Published as a Claude Artifact** (or any static host without directory listings): that trick doesn't work, so it falls back to a prebuilt `midis/bundle.json` — one base64-encoded JSON file (Artifacts only serve a fixed list of file extensions, and raw `.mid` isn't one of them, but `.json` is). Regenerate it whenever that deployment's crate should change:
+`tracks/` (MIDI) and `sfx/` (UI sound effects) are the only asset folders the app loads, and the only ones committed. `midis/` and `wavs/` are git-ignored scratch space for raw files and work in progress — move a finished file into `tracks/` or `sfx/` to ship it.
+
+**Published as a Claude Artifact** (or any static host without directory listings): that trick doesn't work, so it falls back to a prebuilt `tracks/bundle.json` — one base64-encoded JSON file (Artifacts only serve a fixed list of file extensions, and raw `.mid` isn't one of them, but `.json` is). Regenerate it whenever that deployment's crate should change:
 
 ```bash
-cd midis && python3 -c "
+cd tracks && python3 -c "
 import json, os, base64
 bundle = {}
 for f in sorted(os.listdir('.')):
@@ -37,7 +39,7 @@ This preload is the only way records get into the bin — the track-select menu 
 
 ## What it does
 
-- **Record bin** — no separate panel; it lives inside each deck's track-select menu (open it with Enter or a click), populated from whatever's preloaded from `midis/` (see below). Each entry gets BPM and key detected immediately (Krumhansl-Schmuckler key-finding). Any grid start or markers already baked into a file (via the companion [MIDI Marker Tool](../midi-marker-tool)) are read too and used during mixing (see Grid start, below), even though the menu row itself no longer displays that status.
+- **Record bin** — no separate panel; it lives inside each deck's track-select menu (open it with Enter or a click), populated from whatever's preloaded from `tracks/` (see below). Each entry gets BPM and key detected immediately (Krumhansl-Schmuckler key-finding). Any grid start or markers already baked into a file (via the companion [MIDI Marker Tool](../midi-marker-tool)) are read too and used during mixing (see Grid start, below), even though the menu row itself no longer displays that status.
 - **Title/artist, read from the file itself when present** — if a track has been through the MIDI Marker Tool's Track Info fields, its display name becomes "Artist — Title" instead of the raw filename. Title comes from the file's own Sequence/Track Name slot; artist has no standard MIDI field, so it's a plain Text meta-event by convention with that tool. Falls back to the filename when neither is set. Since this just reads whatever's in those slots, a file from somewhere else that already happens to have *something* there (a few of the preloaded tracks carry a leftover watermark or generic sequencer name from whatever tool originally made them) will show that instead — there's no way to tell real tags apart from incidental ones at the format level.
 - **Two decks (A/B), each with its own always-on scrolling piano roll** — every note the deck is about to play, colored by channel (percussion in gray), scrolling past a fixed playhead line as it plays, both decks running independently and simultaneously. The visible window is always ~4 bars at the deck's *current* tempo, so the zoom level naturally tracks tempo changes from a beatmatch. A deck's grid start (cyan flag) and markers (amber flags, pure annotations) are drawn right on the timeline; the armed mix trigger point and crossfade window overlay on top of whichever deck is the current mix anchor.
 - **Keyboard-driven deck selection and loading** — a SNES-emulator-style layout: arrow keys are the d-pad, and A/S/X/Enter stand in for a game controller's face buttons and Start:

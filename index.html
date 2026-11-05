@@ -1131,9 +1131,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     src.connect(sfxGain);
     src.start();
   }
-  loadSfx("menuIn", "wavs/deck_ui_side_menu_fly_in.wav");
-  loadSfx("menuOut", "wavs/deck_ui_side_menu_fly_out.wav");
-  loadSfx("armStab", "wavs/powerful_stab_that_s_%234-1793821868127.wav");
+  loadSfx("menuIn", "sfx/deck_ui_side_menu_fly_in.wav");
+  loadSfx("menuOut", "sfx/deck_ui_side_menu_fly_out.wav");
+  loadSfx("armStab", "sfx/deck_arm_stab.wav");
 
   // Reverb + chorus, as parallel sends on top of the dry signal (same
   // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
@@ -1672,7 +1672,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (!binEntries.length) {
       const p = document.createElement("p");
       p.className = "hint";
-      p.textContent = "No records in the bin — drop a few into midis/ and reload.";
+      p.textContent = "No records in the bin — drop a few into tracks/ and reload.";
       trackMenuList.appendChild(p);
       return;
     }
@@ -2297,13 +2297,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
   requestAnimationFrame(frame);
 
-  // --- preload the local midis/ folder into the bin on startup ---
-  // Primary path (local dev server): read the midis/ directory listing
+  // --- preload the local tracks/ folder into the bin on startup ---
+  // Primary path (local dev server): read the tracks/ directory listing
   // directly — Python's http.server (and most static servers) generate
   // one for free — so anything dropped into that folder is picked up on
   // the next page load with no build/regeneration step at all.
   async function discoverLocalMidis() {
-    const res = await fetch("midis/");
+    const res = await fetch("tracks/");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, "text/html");
@@ -2316,7 +2316,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   // Fallback path (published Artifact, or any static host with no
-  // directory listing): one base64-encoded midis/bundle.json, rebuilt by
+  // directory listing): one base64-encoded tracks/bundle.json, rebuilt by
   // hand whenever that deployment's crate needs to change — see README.
   function base64ToArrayBuffer(b64) {
     const binary = atob(b64);
@@ -2330,7 +2330,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     try {
       names = await discoverLocalMidis();
       fromListing = true;
-      log(`Found ${names.length} MIDI file(s) in midis/ via directory listing.`);
+      log(`Found ${names.length} MIDI file(s) in tracks/ via directory listing.`);
     } catch (err) {
       fromListing = false;
     }
@@ -2338,7 +2338,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     let bundle = null;
     if (!fromListing) {
       try {
-        const res = await fetch("midis/bundle.json");
+        const res = await fetch("tracks/bundle.json");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         bundle = await res.json();
         names = Object.keys(bundle);
@@ -2352,7 +2352,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     for (const name of names) {
       try {
         const buf = fromListing
-          ? await (await fetch(`midis/${encodeURIComponent(name)}`)).arrayBuffer()
+          ? await (await fetch(`tracks/${encodeURIComponent(name)}`)).arrayBuffer()
           : base64ToArrayBuffer(bundle[name]);
         const midi = new Midi(buf);
         const entry = analyzeEntry(midi, name);
@@ -2363,7 +2363,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         log(`Could not preload "${name}": ${errText(err)}`);
       }
     }
-    log(`Preloaded ${loaded} record(s) from midis/ into the bin${failed ? ` (${failed} failed — see above)` : ""}.`);
+    log(`Preloaded ${loaded} record(s) from tracks/ into the bin${failed ? ` (${failed} failed — see above)` : ""}.`);
   }
 
   log("Ready. Select a deck and press Enter to open its record bin, load a track and press Space to go live, then load another into the other deck and press Space again to Beatmatch Mix.");
