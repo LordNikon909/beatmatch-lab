@@ -1137,6 +1137,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   loadSfx("menuIn", "sfx/deck_ui_side_menu_fly_in.wav");
   loadSfx("menuOut", "sfx/deck_ui_side_menu_fly_out.wav");
   loadSfx("loadStab", "sfx/deck_load_stab.wav");
+  loadSfx("mixStart", "sfx/deck-armed-02.wav");
 
   // Reverb + chorus, as parallel sends on top of the dry signal (same
   // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
@@ -2045,6 +2046,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const roles = getAnchorIncoming();
     if (!roles || !roles.incoming.midi) return;
     mixInBusy = true;
+    playSfx("mixStart");
     const { anchor, incoming } = roles;
     // A mid-glide anchor needs to hold still to be a stable reference
     // for the incoming deck — freeze it at whatever it currently reads
