@@ -372,6 +372,9 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   background: var(--panel-raised); color: var(--fg); border-radius: 4px;
   padding: 2px 6px; border: 1px solid var(--line); min-width: 1.3em; text-align: center;
 }
+/* Game controller buttons: rounded so they read as pad buttons, not keys. */
+.keybind-row kbd.pad { border-radius: 999px; padding: 2px 7px; }
+.keybind-row .or { opacity: 0.55; }
 .debug-stats {
   position: fixed; bottom: 10px; right: 10px; z-index: 50;
   background: rgba(0, 0, 0, 0.75); color: #8fe88f; font-family: var(--mono);
@@ -494,11 +497,11 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
     </div>
 
     <div class="keybind-legend">
-      <div class="keybind-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Select deck A / B</span></div>
-      <div class="keybind-row"><kbd>A</kbd><span>Open menu / confirm track</span></div>
-      <div class="keybind-row"><kbd>S</kbd><kbd>Space</kbd><span>Arm deck / trigger mix</span></div>
-      <div class="keybind-row"><kbd>X</kbd><kbd>Esc</kbd><span>Close menu</span></div>
-      <div class="keybind-row"><kbd>&uarr;</kbd><kbd>&darr;</kbd><span>Browse menu</span></div>
+      <div class="keybind-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd><span class="or">/</span><kbd class="pad">D-pad &#9664;&#9654;</kbd><span>Select deck A / B</span></div>
+      <div class="keybind-row"><kbd>A</kbd><span class="or">/</span><kbd class="pad">A</kbd><span>Open menu / confirm track</span></div>
+      <div class="keybind-row"><kbd>S</kbd><kbd>Space</kbd><span class="or">/</span><kbd class="pad">Y</kbd><span>Arm deck / trigger mix</span></div>
+      <div class="keybind-row"><kbd>X</kbd><kbd>Esc</kbd><span class="or">/</span><kbd class="pad">B</kbd><span>Close menu</span></div>
+      <div class="keybind-row"><kbd>&uarr;</kbd><kbd>&darr;</kbd><span class="or">/</span><kbd class="pad">D-pad &#9650;&#9660;</kbd><span>Browse menu</span></div>
       <div class="keybind-row"><kbd>Backspace</kbd><span>Stop all decks</span></div>
     </div>
   </div>
@@ -1839,53 +1842,45 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     setTheme(current === "dark" ? "light" : "dark");
   });
 
-  window.addEventListener("keydown", (e) => {
-    const tag = document.activeElement && document.activeElement.tagName;
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-
-    // SNES-emulator-style layout: A = confirm/open, S = play/go, X = back/
-    // close, Enter = Start (pause) — the d-pad (arrows) stays as-is. P is
-    // kept as a legacy alias for pause alongside Enter.
+  // Every control action in one place, shared by the keyboard and a game
+  // controller (see pollGamepads) so the two can't drift apart. Returns
+  // true when the action applies in the current mode (menu open or not),
+  // which tells the keyboard handler to swallow the key.
+  function handleControl(action) {
     // TEMPORARILY DISABLED while ruling out pause/resume as a source of
     // the timing issues under investigation — togglePause() itself is
     // untouched, just unreachable from here. Flip PAUSE_ENABLED back to
     // restore both this hotkey and the overlay's own click-to-resume.
-    if (PAUSE_ENABLED && (e.key === "p" || e.key === "P" || e.key === "Enter")) { e.preventDefault(); togglePause(); return; }
-    if (paused) return; // everything else is frozen until resumed
+    if (action === "pause") {
+      if (!PAUSE_ENABLED) return false;
+      togglePause();
+      return true;
+    }
+    if (paused) return false; // everything else is frozen until resumed
 
     if (menuOpen) {
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        const next = Math.max(0, menuHighlightIndex - 1);
+      if (action === "up" || action === "down") {
+        const next = action === "up"
+          ? Math.max(0, menuHighlightIndex - 1)
+          : Math.min(binEntries.length - 1, menuHighlightIndex + 1);
         if (next !== menuHighlightIndex) playSfx("menuIn");
         menuHighlightIndex = next;
         renderTrackMenu();
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        const next = Math.min(binEntries.length - 1, menuHighlightIndex + 1);
-        if (next !== menuHighlightIndex) playSfx("menuIn");
-        menuHighlightIndex = next;
-        renderTrackMenu();
+        return true;
       }
-      else if (e.key === "a" || e.key === "A") { e.preventDefault(); confirmMenuSelection(); }
-      else if (e.key === "x" || e.key === "X" || e.key === "Escape") { e.preventDefault(); playSfx("menuOut"); closeTrackMenu(); }
-      return;
+      if (action === "confirm") { confirmMenuSelection(); return true; }
+      if (action === "back") { playSfx("menuOut"); closeTrackMenu(); return true; }
+      return false;
     }
 
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
+    if (action === "left" || action === "right") {
       const prevSelected = selectedDeck;
-      selectDeck(slotA);
+      selectDeck(action === "left" ? slotA : slotB);
       if (selectedDeck !== prevSelected) playSfx("menuIn");
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      const prevSelected = selectedDeck;
-      selectDeck(slotB);
-      if (selectedDeck !== prevSelected) playSfx("menuIn");
+      return true;
     }
-    else if (e.key === "a" || e.key === "A") { e.preventDefault(); openTrackMenu(); }
-    else if (e.key === "s" || e.key === "S" || e.key === " " || e.code === "Space") {
-      e.preventDefault();
+    if (action === "confirm") { openTrackMenu(); return true; }
+    if (action === "go") {
       // Context-sensitive, like a single "go" button: once a record's
       // loaded-but-silent in the other deck while one is live, that's the
       // automatic mix to trigger (mixInAvailable/mixInBusy already track
@@ -1895,8 +1890,60 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       // is locked — armDeck no-ops rather than stopping it.
       if (mixInAvailable && !mixInBusy) triggerBeatmatchMix();
       else if (selectedDeck) armDeck(selectedDeck, selectedDeck === slotA ? "A" : "B");
+      return true;
     }
-    else if (e.key === "Backspace") { e.preventDefault(); stopAllDecks(); }
+    if (action === "stopAll") { stopAllDecks(); return true; }
+    return false;
+  }
+
+  // SNES-emulator-style layout: A = confirm/open, S = play/go, X = back/
+  // close, Enter = Start (pause) — the d-pad (arrows) stays as-is. P is
+  // kept as a legacy alias for pause alongside Enter.
+  const KEY_ACTIONS = {
+    ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down",
+    a: "confirm", A: "confirm",
+    x: "back", X: "back", Escape: "back",
+    s: "go", S: "go", " ": "go",
+    Backspace: "stopAll",
+    p: "pause", P: "pause", Enter: "pause",
+  };
+  window.addEventListener("keydown", (e) => {
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    const action = KEY_ACTIONS[e.key] || (e.code === "Space" ? "go" : null);
+    if (action && handleControl(action)) e.preventDefault();
+  });
+
+  // Game controller (Bluetooth or USB) via the browser's Gamepad API,
+  // polled once per frame from frame(). Buttons are by position in the
+  // "standard" layout (Xbox labels): A = bottom, B = right, Y = top — so
+  // on a Nintendo-style pad, where the printed letters are swapped, these
+  // are the buttons in the same spots. No stop-all button on purpose.
+  const PAD_ACTIONS = { 0: "confirm", 1: "back", 3: "go", 12: "up", 13: "down", 14: "left", 15: "right" };
+  const padPrevPressed = new Map(); // gamepad index -> last frame's pressed flags
+  function pollGamepads() {
+    if (!navigator.getGamepads) return;
+    for (const pad of navigator.getGamepads()) {
+      if (!pad || pad.mapping !== "standard") continue;
+      const prev = padPrevPressed.get(pad.index) || [];
+      const pressed = pad.buttons.map((b) => b.pressed);
+      for (const [i, action] of Object.entries(PAD_ACTIONS)) {
+        if (pressed[i] && !prev[i]) handleControl(action);
+      }
+      padPrevPressed.set(pad.index, pressed);
+    }
+  }
+  window.addEventListener("gamepadconnected", (e) => {
+    const pad = e.gamepad;
+    if (pad.mapping !== "standard") {
+      log(`Controller connected (${pad.id}), but its button layout isn't one the browser recognizes, so it can't be used yet.`);
+      return;
+    }
+    log(`Controller connected: ${pad.id}.${nativeCtx.state === "running" ? "" : " Click the page or press any key once to turn on audio — browsers won't let a controller start sound by itself."}`);
+  });
+  window.addEventListener("gamepaddisconnected", (e) => {
+    padPrevPressed.delete(e.gamepad.index);
+    log(`Controller disconnected: ${e.gamepad.id}.`);
   });
 
   volA.addEventListener("input", () => {
@@ -2169,6 +2216,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   function frame() {
     if (!slotA || !slotB) { requestAnimationFrame(frame); return; }
+    pollGamepads();
     const nowPerf = performance.now();
     perfStats.lastFrameMs = nowPerf - lastFrameTime;
     lastFrameTime = nowPerf;
