@@ -1225,9 +1225,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const { events, spans, programs } = collectNotes(slot.midi);
     programs.forEach((program, channel) => slot.synth.programChange(channel, program));
 
-    // Cached so a tempo ramp (see startTempoRamp) can rebuild the
-    // scheduler at a new scale repeatedly without re-walking the MIDI.
+    // Cached so a Beatmatch Mix entry and every tempo-ramp swap after it
+    // (see triggerBeatmatchMix / startTempoRamp) schedule from the SAME
+    // event objects — fire()'s rampFiredThisLap dedup is keyed by object
+    // identity, so a second copy of the notes would look entirely unsent.
     slot.events = events;
+    slot.programs = programs;
     slot.spans = spans;
     let minP = 127, maxP = 0;
     spans.forEach((s) => { minP = Math.min(minP, s.midi); maxP = Math.max(maxP, s.midi); });
@@ -1997,8 +2000,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     try {
     await ensureAudio();
 
-    const { events, programs } = collectNotes(incoming.midi);
-    programs.forEach((program, channel) => incoming.synth.programChange(channel, program));
+    // Must be the deck's cached array, not a fresh collectNotes() copy:
+    // the post-mix tempo ramp swaps schedulers on incoming.events, and a
+    // different copy here made its first swap re-send every note from the
+    // last ~100ms (a doubled-note flam at the start of each glide).
+    const events = incoming.events;
+    incoming.programs.forEach((program, channel) => incoming.synth.programChange(channel, program));
 
     // Use the anchor's CURRENT effective tempo, not its native one — if
     // the anchor itself got beatmatched into some earlier deck's tempo,
