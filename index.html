@@ -1136,7 +1136,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
   loadSfx("menuIn", "sfx/deck_ui_side_menu_fly_in.wav");
   loadSfx("menuOut", "sfx/deck_ui_side_menu_fly_out.wav");
-  loadSfx("armStab", "sfx/deck_arm_stab.wav");
+  loadSfx("loadStab", "sfx/deck_load_stab.wav");
 
   // Reverb + chorus, as parallel sends on top of the dry signal (same
   // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
@@ -1330,7 +1330,13 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   const themeToggle = document.getElementById("themeToggle");
   const themeToggleIcon = document.getElementById("themeToggleIcon");
 
-  const mixState = { phase: "idle", nextPhrase: 0, overlapSec: 0, anchor: null, incoming: null };
+  // `timers`: Transport IDs of an armed mix's scheduled crossfade start and
+  // completion, so Stop All can cancel them (see cancelMixTimers).
+  const mixState = { phase: "idle", nextPhrase: 0, overlapSec: 0, anchor: null, incoming: null, timers: [] };
+  function cancelMixTimers() {
+    for (const id of mixState.timers) Tone.Transport.clear(id);
+    mixState.timers = [];
+  }
 
   function getAnchorIncoming() {
     if (slotA.playing && !slotB.playing) return { anchor: slotA, incoming: slotB };
@@ -1547,6 +1553,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   async function loadBinEntryIntoDeck(entry, which) {
     const slot = which === "A" ? slotA : slotB;
     if (slot.playing || mixState.phase === "armed" || mixState.phase === "crossfading") return;
+    playSfx("loadStab");
     const nameEl = which === "A" ? nameA : nameB;
     const nameEl2 = which === "A" ? nameA2 : nameB2;
     const pillEl = which === "A" ? pillA : pillB;
@@ -1622,7 +1629,6 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   async function armDeck(slot, which) {
     if (!slot.midi || slot.playing) return;
-    playSfx("armStab");
     const volSlider = which === "A" ? volA : volB;
     await ensureAudio();
     playSlot(slot, volSlider.value);
@@ -2106,7 +2112,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     // decks' gain nodes live on nativeCtx (see the comment by its
     // declaration), so the Tone.Transport-scheduled callback's "time"
     // has to go through toNativeTime() before it reaches them.
-    Tone.Transport.schedule((time) => {
+    mixState.timers = [];
+    mixState.timers.push(Tone.Transport.schedule((time) => {
       const nt = toNativeTime(time);
       const currentAnchorVal = anchor.gain.gain.value;
       incoming.gain.gain.cancelScheduledValues(nt);
@@ -2116,7 +2123,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       anchor.gain.gain.cancelScheduledValues(nt);
       anchor.gain.gain.setValueAtTime(currentAnchorVal, nt);
       anchor.gain.gain.linearRampToValueAtTime(0, nt + overlapSec);
-    }, nextPhrase);
+    }, nextPhrase));
 
     incoming.playing = true;
     incoming.effectiveBpm = anchor.effectiveBpm;
@@ -2139,7 +2146,8 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const entryDesc = incomingFromTime > 0 ? `its grid start (skipping its first ${incomingFromTime.toFixed(1)}s)` : "its own downbeat";
     log(`Beatmatch Mix armed: Deck ${incoming.name} retimed ${incoming.bpm.toFixed(1)}→${anchor.effectiveBpm.toFixed(1)} BPM (×${scale.toFixed(3)}), will enter at ${entryDesc} at bar ${barNum} of Deck ${anchor.name} (t=${nextPhrase.toFixed(2)}s), crossfading over ${overlapBars} bar(s) / ${overlapSec.toFixed(2)}s.`);
 
-    Tone.Transport.scheduleOnce(() => {
+    mixState.timers.push(Tone.Transport.scheduleOnce(() => {
+      mixState.timers = [];
       try {
         if (anchor.eventsPart) anchor.eventsPart.stop();
         silenceSynth(anchor);
@@ -2161,9 +2169,10 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         log(`Error finishing the crossfade: ${errText(err)}`);
         mixInBusy = false;
       }
-    }, nextPhrase + overlapSec + 0.02);
+    }, nextPhrase + overlapSec + 0.02));
     } catch (err) {
       log(`Beatmatch Mix failed to start: ${errText(err)}`);
+      cancelMixTimers();
       mixState.phase = "idle";
       mixState.anchor = null;
       mixState.incoming = null;
@@ -2173,6 +2182,11 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   function stopAllDecks() {
+    // An armed or crossfading mix still has its fade start and completion
+    // queued on the Transport — left alone, they fire later against
+    // whatever is on the decks by then.
+    cancelMixTimers();
+    mixInBusy = false;
     stopSlot(slotA);
     stopSlot(slotB);
     mixState.phase = "idle";
