@@ -1125,19 +1125,22 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
       console.warn(`Couldn't load SFX "${name}" (${url}):`, err);
     }
   }
-  function playSfx(name) {
+  // `when` (optional, nativeCtx seconds) schedules it precisely, e.g. from
+  // a Transport callback's time; omitted = play now.
+  function playSfx(name, when) {
     const buffer = sfxBuffers[name];
     if (!buffer) return;
     if (nativeCtx.state !== "running") nativeCtx.resume();
     const src = nativeCtx.createBufferSource();
     src.buffer = buffer;
     src.connect(sfxGain);
-    src.start();
+    src.start(when);
   }
   loadSfx("menuIn", "sfx/deck_ui_side_menu_fly_in.wav");
   loadSfx("menuOut", "sfx/deck_ui_side_menu_fly_out.wav");
   loadSfx("loadStab", "sfx/deck_load_stab.wav");
   loadSfx("mixStart", "sfx/deck-armed-02.wav");
+  loadSfx("mixEnding", "sfx/mix_ending_callout.wav");
 
   // Reverb + chorus, as parallel sends on top of the dry signal (same
   // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
@@ -2172,6 +2175,14 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         mixInBusy = false;
       }
     }, nextPhrase + overlapSec + 0.02));
+
+    // Long (16/32-bar) mixes get a voice callout timed to finish right as
+    // the crossfade completes. Kept in mixState.timers so Stop All cancels it.
+    const callout = sfxBuffers.mixEnding;
+    if (overlapBars >= 16 && callout) {
+      const calloutAt = nextPhrase + overlapSec + 0.02 - callout.duration;
+      mixState.timers.push(Tone.Transport.scheduleOnce((time) => playSfx("mixEnding", toNativeTime(time)), calloutAt));
+    }
     } catch (err) {
       log(`Beatmatch Mix failed to start: ${errText(err)}`);
       cancelMixTimers();
