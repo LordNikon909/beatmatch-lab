@@ -1,9 +1,11 @@
 .DS_Store
 *.tmp
 
-# Soundfonts are large, swappable, user-supplied local assets (see README) —
-# never committed, regardless of format.
-soundfonts/
+# Soundfonts are large, swappable local assets (see README). Only the one
+# the app actually loads is committed, so a static deploy (e.g. Vercel)
+# has it; anything else dropped in here stays local.
+soundfonts/*
+!soundfonts/GeneralUserGS.sf3
 
 # Scratch/working folders. What the app actually loads lives in tracks/
 # (MIDI) and sfx/ (sound effects) — move finished files there to ship them.
