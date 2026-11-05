@@ -1160,6 +1160,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   loadSfx("menuOut", "sfx/deck_ui_side_menu_fly_out.wav");
   loadSfx("loadStab", "sfx/deck_load_stab.wav");
   loadSfx("mixStart", "sfx/deck-armed-02.wav");
+  loadSfx("firstPlay", "sfx/powerful-stab-02.wav");
   loadSfx("mixEnding", "sfx/mix_ending_callout.wav");
 
   // Reverb + chorus, as parallel sends on top of the dry signal (same
@@ -1653,6 +1654,9 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
 
   async function armDeck(slot, which) {
     if (!slot.midi || slot.playing) return;
+    // The one start that isn't a mix: the set's opening track (or the first
+    // one after Stop All). Every later go-press triggers a mix instead.
+    playSfx("firstPlay");
     const volSlider = which === "A" ? volA : volB;
     await ensureAudio();
     playSlot(slot, volSlider.value);
