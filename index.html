@@ -377,6 +377,17 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 }
 .start-screen[hidden] { display: none; }
 .start-card { width: min(600px, 100%); text-align: center; }
+/* Step 1 of 2: a "press any key" gate. Its click/key is the gesture the
+   browser needs before any audio, so the intro (logo drop + sound, title
+   music) can play for every visitor; Start is then the second press. */
+.start-gate {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--display); font-size: clamp(18px, 3vw, 24px); font-weight: 700;
+  letter-spacing: 0.15em; color: var(--fg); cursor: pointer;
+  animation: pauseBlink 1.2s steps(1) infinite;
+}
+.start-screen.intro .start-gate { display: none; }
+.start-screen:not(.intro) .start-card { visibility: hidden; }
 .start-logo { display: block; width: 100%; height: auto; margin: 0 auto; }
 /* Hidden until its image is ready, then drops in from above the screen and
    bounces to rest (see the logo intro in the script). */
@@ -570,6 +581,7 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 </div>
 
 <div class="start-screen" id="startScreen">
+  <div class="start-gate">PRESS ANY KEY</div>
   <div class="start-card">
     <img class="start-logo" src="logo.png" alt="Vinyl Crisis" width="1200" height="707">
     <div class="start-bar"><div class="start-bar-fill" id="startBarFill"></div></div>
@@ -610,6 +622,7 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   const startButton = document.getElementById("startButton");
   let started = false;
   let readyToStart = false;
+  let introStarted = false; // the "press any key" gate has been passed (beginIntro)
   function setStartProgress(fraction, status) {
     startBarFill.style.width = `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
     if (status) startStatus.textContent = status;
@@ -1259,19 +1272,10 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   loadSfx("firstPlay", "sfx/powerful-stab-02.wav");
   loadSfx("mixEnding", "sfx/mix_ending_callout.wav");
 
-  // Logo intro: once the logo image and its sound are both ready, drop the
-  // logo in (CSS .drop-in) and play vinyl-crisis.wav with it. The sound only
-  // plays if the browser already allows audio — playing into a still-blocked
-  // context would queue it and blurt it out later on the Start press.
+  // Logo intro (played by beginIntro, on the start screen's first press):
+  // the logo image and its sound both have to be loaded first.
   const startLogo = document.querySelector(".start-logo");
-  Promise.all([startLogo.decode().catch(() => {}), loadSfx("logoIntro", "sfx/vinyl-crisis.wav")])
-    .then(async () => {
-      if (started) return;
-      nativeCtx.resume().catch(() => {});
-      await new Promise((r) => setTimeout(r, 100));
-      startLogo.classList.add("drop-in");
-      if (nativeCtx.state === "running") playSfx("logoIntro");
-    });
+  const logoIntroReady = Promise.all([startLogo.decode().catch(() => {}), loadSfx("logoIntro", "sfx/vinyl-crisis.wav")]);
 
   // Reverb + chorus, as parallel sends on top of the dry signal (same
   // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
@@ -1360,15 +1364,20 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
 
   // Start-screen music: a looping MIDI on its own synth + SpessaSynth's
   // built-in Sequencer, fully separate from the decks (no Tone Transport,
-  // no deck synth state touched). Browsers only allow sound before a user
-  // gesture on sites they already trust, so this plays only when the audio
-  // context is already allowed to run — otherwise the start screen stays
-  // silent, and nothing extra is set up.
+  // no deck synth state touched). Starts once both the gate has been pressed
+  // (audio unlocked, see beginIntro) and the soundfont has loaded, in either
+  // order — maybeStartTitleMusic is called from both places.
   let titleMusic = null;
+  let titleSoundfont = null;
+  function maybeStartTitleMusic() {
+    if (!introStarted || !titleSoundfont || started) return;
+    const sfBuffer = titleSoundfont;
+    titleSoundfont = null;
+    startTitleMusic(sfBuffer);
+  }
   async function startTitleMusic(sfBuffer) {
     try {
-      nativeCtx.resume().catch(() => {});
-      await new Promise((r) => setTimeout(r, 150));
+      await nativeCtx.resume();
       if (started || nativeCtx.state !== "running") return;
       const gain = nativeCtx.createGain();
       gain.gain.value = 0.8;
@@ -2095,9 +2104,12 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   };
   window.addEventListener("keydown", (e) => {
     if (!started) {
-      // Any key starts (once loading is done) — it's the audio-unlock gesture.
+      // Start screen: the first press plays the intro (and unlocks audio),
+      // the next one starts once loading is done. Auto-repeat is ignored so
+      // holding a key can't skip straight through both.
       if (e.key !== "Tab") e.preventDefault();
-      beginSession();
+      if (e.repeat) return;
+      if (!introStarted) beginIntro(); else beginSession();
       return;
     }
     const tag = document.activeElement && document.activeElement.tagName;
@@ -2626,10 +2638,26 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
     log(`Preloaded ${loaded} record(s) from tracks/ into the bin${failed ? ` (${failed} failed — see above)` : ""}.`);
   }
 
-  // The Start press doubles as the user gesture browsers require before any
-  // audio can play. It only unlocks the two audio contexts — the Transport
-  // still starts on the first arm (ensureAudio), so a loaded deck doesn't
-  // start advancing silently before the player actually plays it.
+  // Start screen step 1: the first click/key is the gesture browsers require
+  // before any audio can play, so it unlocks both audio contexts and plays
+  // the intro — logo drop with vinyl-crisis.wav, then the title music once
+  // its soundfont is ready. The Transport still starts on the first arm
+  // (ensureAudio), so a loaded deck doesn't advance silently before play.
+  function beginIntro() {
+    if (introStarted || started) return;
+    introStarted = true;
+    startScreen.classList.add("intro");
+    Promise.all([Tone.start(), nativeCtx.resume()])
+      .catch((err) => log(`Couldn't start audio: ${errText(err)}`));
+    logoIntroReady.then(() => {
+      if (started) return;
+      startLogo.classList.add("drop-in");
+      playSfx("logoIntro");
+    });
+    maybeStartTitleMusic();
+  }
+
+  // Step 2: Start (once loading is done) enters the app.
   function beginSession() {
     if (started || !readyToStart) return;
     started = true;
@@ -2639,12 +2667,12 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
       .then(() => playSfx("loadStab"))
       .catch((err) => log(`Couldn't start audio: ${errText(err)}`));
   }
-  startScreen.addEventListener("click", beginSession);
+  startScreen.addEventListener("click", () => (introStarted ? beginSession() : beginIntro()));
 
   log("Ready. Select a deck and press Enter to open its record bin, load a track and press Space to go live, then load another into the other deck and press Space again to Beatmatch Mix.");
   try {
-    const sfBuffer = await initAudioEngine();
-    startTitleMusic(sfBuffer); // not awaited: the tracks keep loading meanwhile
+    titleSoundfont = await initAudioEngine();
+    maybeStartTitleMusic(); // starts now if the gate's already been pressed
     selectDeck(slotA);
     await preloadBin();
     readyToStart = true;
