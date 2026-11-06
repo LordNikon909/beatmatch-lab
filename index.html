@@ -6,6 +6,9 @@
 // of the system preference. The toggle button (further down) can switch
 // themes during a visit, but the choice isn't remembered.
 document.documentElement.setAttribute("data-theme", "dark");
+// The CRT overlay is on by default; the CRT button turns it off, and that
+// choice IS remembered in this browser (it's a working convenience).
+try { if (localStorage.getItem("vc-crt") === "off") document.documentElement.classList.add("crt-off"); } catch (e) {}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -77,6 +80,7 @@ body::before, body::after {
 }
 body::before { background: repeating-linear-gradient(var(--crt-red) 0px, var(--crt-green) 2px, var(--crt-blue) 4px); }
 body::after { background: repeating-linear-gradient(90deg, var(--crt-red) 1px, var(--crt-green) 2px, var(--crt-blue) 3px); }
+html.crt-off body::before, html.crt-off body::after { display: none; }
 
 body {
   background: var(--bg);
@@ -342,7 +346,7 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .track-menu-col-bpm { flex: 0 0 70px; text-align: right; font-size: 13px; font-weight: 700; color: var(--text-on-chrome); }
 .track-menu-hint { font-size: 11.5px; color: var(--fg-dim); padding: 0 10px; }
 
-.theme-toggle {
+.theme-toggle, .crt-toggle {
   position: fixed; top: 16px; right: 16px; z-index: 40;
   width: 36px; height: 36px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -350,6 +354,14 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   cursor: pointer; padding: 0;
 }
 .theme-toggle svg { width: 18px; height: 18px; fill: currentColor; }
+/* CRT on/off, just left of the theme toggle: scanlines in the icon when
+   on; dimmed and struck through when off. */
+.crt-toggle { right: 60px; }
+.crt-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.crt-toggle .crt-slash { display: none; }
+html.crt-off .crt-toggle { color: var(--fg-dim); }
+html.crt-off .crt-toggle .crt-lines { display: none; }
+html.crt-off .crt-toggle .crt-slash { display: inline; }
 
 .pause-overlay {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);
@@ -444,6 +456,9 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 }
 </style>
 
+<button class="crt-toggle" id="crtToggle" aria-label="CRT effect" aria-pressed="true" title="CRT effect">
+  <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M9 21h6M12 17v4"/><path class="crt-lines" d="M7 8.5h10M7 12.5h10"/><path class="crt-slash" d="M4 3l16 16"/></svg>
+</button>
 <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark/light theme">
   <svg viewBox="0 0 24 24"><path id="themeToggleIcon"></path></svg>
 </button>
@@ -2034,6 +2049,20 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   themeToggle.addEventListener("click", () => {
     const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
     setTheme(current === "dark" ? "light" : "dark");
+  });
+
+  // CRT overlay on/off (the class is applied before first paint by the
+  // <head> script; this syncs the button and remembers changes).
+  const crtToggle = document.getElementById("crtToggle");
+  function syncCrtToggle() {
+    crtToggle.setAttribute("aria-pressed", String(!document.documentElement.classList.contains("crt-off")));
+  }
+  syncCrtToggle();
+  crtToggle.addEventListener("click", () => {
+    const off = document.documentElement.classList.toggle("crt-off");
+    try { localStorage.setItem("vc-crt", off ? "off" : "on"); } catch (e) {}
+    syncCrtToggle();
+    crtToggle.blur(); // so Space/Enter go back to the decks, not this button
   });
 
   // Every control action in one place, shared by the keyboard and a game
