@@ -1,4 +1,4 @@
-# Beat Match Lab
+# Vinyl Crisis
 
 A browser proof-of-concept exploring an RPG battle-screen mechanic built around DJ beatmatching: load MIDI records into a bin, mix two decks together with automatic phrase-synced crossfades, and watch each deck's actual notes scroll past a fixed playhead — Traktor/Rekordbox-style — live. The deck UI is keyboard-navigable (arrow keys stand in for a game controller, which is where this is ultimately headed), styled to match a Framer design reference (colors, type, chrome, the scrolling track-title ticker) pixel-for-pixel where the two overlap.
 
@@ -6,7 +6,7 @@ A browser proof-of-concept exploring an RPG battle-screen mechanic built around 
 
 **Don't open `index.html` directly (double-clicking it loads it as a `file://` URL)** — browsers block the fetches this app needs (the bin preload, the AudioWorklet module, the soundfont) from `file://`, so nothing will load and the console fills with CORS/module errors.
 
-Easiest: double-click **`Start Beat Match Lab.command`**. It starts a local server and opens your browser to it. Leave that terminal window open while you use the app; closing it (or Ctrl+C) stops the server.
+Easiest: double-click **`Start Vinyl Crisis.command`**. It starts a local server and opens your browser to it. Leave that terminal window open while you use the app; closing it (or Ctrl+C) stops the server.
 
 Or run any static file server yourself, e.g.:
 

@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Beat Match Lab</title>
+<title>Vinyl Crisis</title>
 <script>
 // Applied before first paint, synchronously, so there's no flash of the
 // wrong theme: a saved manual choice wins, otherwise fall back to the
@@ -376,24 +376,38 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 
 /* Title/loading screen: covers the app until everything's loaded and the
    player presses Start — which is also the click/key the browser needs
-   before it'll let any audio play. */
+   before it'll let any audio play. Always uses the dark palette, whatever
+   the app theme — the Vinyl Crisis logo is drawn for a dark background. */
 .start-screen {
+  --bg: #2b2b2b; --panel-raised: #454545; --fg: #f0f0f0; --fg-dim: #9a9a9a; --line: #4a4a4a;
   position: fixed; inset: 0; z-index: 70; background: var(--bg);
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .start-screen[hidden] { display: none; }
 .start-card { width: min(600px, 100%); text-align: center; }
-.start-title {
-  font-family: var(--display); font-size: clamp(30px, 7vw, 46px); font-weight: 700;
-  letter-spacing: 0.12em; color: var(--fg); line-height: 1.1;
+.start-logo { display: block; width: 100%; height: auto; margin: 0 auto; }
+/* Hidden until its image is ready, then drops in from above the screen and
+   bounces to rest (see the logo intro in the script). */
+.start-logo:not(.drop-in) { visibility: hidden; }
+.start-logo.drop-in { animation: logoDrop 1.1s both; }
+@keyframes logoDrop {
+  0%   { transform: translateY(-110vh); animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+  50%  { transform: translateY(0);      animation-timing-function: cubic-bezier(0, 0.55, 0.45, 1); }
+  64%  { transform: translateY(-34px);  animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+  78%  { transform: translateY(0);      animation-timing-function: cubic-bezier(0, 0.55, 0.45, 1); }
+  88%  { transform: translateY(-10px);  animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+  100% { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-logo.drop-in { animation: none; }
 }
 .start-bar { margin: 32px 0 10px; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
-.start-bar-fill { height: 100%; width: 0%; background: var(--accent-green); transition: width 0.15s linear; }
+.start-bar-fill { height: 100%; width: 0%; background: #6e77ea; transition: width 0.15s linear; }
 .start-status { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); min-height: 1.5em; }
 .start-status.error { color: var(--accent-a); }
 .start-button {
   margin-top: 28px; padding: 14px 34px; border-radius: 999px; border: 0;
-  background: var(--accent-green); color: #0d2b1f; cursor: pointer;
+  background: #cadcf0; color: #1f2347; cursor: pointer;
   font-family: var(--display); font-size: 18px; font-weight: 700; letter-spacing: 0.12em;
 }
 .start-button:disabled { background: var(--panel-raised); color: var(--fg-dim); cursor: default; }
@@ -565,7 +579,7 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 
 <div class="start-screen" id="startScreen">
   <div class="start-card">
-    <div class="start-title">BEAT MATCH LAB</div>
+    <img class="start-logo" src="logo.png" alt="Vinyl Crisis" width="1200" height="707">
     <div class="start-bar"><div class="start-bar-fill" id="startBarFill"></div></div>
     <div class="start-status" id="startStatus">Loading…</div>
     <button class="start-button" id="startButton" disabled>LOADING</button>
@@ -583,7 +597,7 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
 <script src="https://unpkg.com/@tonejs/midi@2.0.28/build/Midi.js"></script>
 <script type="module">
-import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib@4.3.5/+esm";
+import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib@4.3.5/+esm";
 
 (async function () {
   "use strict";
@@ -1253,6 +1267,20 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   loadSfx("firstPlay", "sfx/powerful-stab-02.wav");
   loadSfx("mixEnding", "sfx/mix_ending_callout.wav");
 
+  // Logo intro: once the logo image and its sound are both ready, drop the
+  // logo in (CSS .drop-in) and play vinyl-crisis.wav with it. The sound only
+  // plays if the browser already allows audio — playing into a still-blocked
+  // context would queue it and blurt it out later on the Start press.
+  const startLogo = document.querySelector(".start-logo");
+  Promise.all([startLogo.decode().catch(() => {}), loadSfx("logoIntro", "sfx/vinyl-crisis.wav")])
+    .then(async () => {
+      if (started) return;
+      nativeCtx.resume().catch(() => {});
+      await new Promise((r) => setTimeout(r, 100));
+      startLogo.classList.add("drop-in");
+      if (nativeCtx.state === "running") playSfx("logoIntro");
+    });
+
   // Reverb + chorus, as parallel sends on top of the dry signal (same
   // shape as chiptune.app's own Reverb/Chorus knobs) — dry GM playback
   // alone reads thin and clinical; a touch of room glue plus gentle
@@ -1335,6 +1363,45 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     ]);
     await Promise.all([slotA.synth.isReady, slotB.synth.isReady]);
     log("Sampler engine ready (GeneralUser GS soundfont, real GM instruments + drum kit).");
+    return sfBuffer;
+  }
+
+  // Start-screen music: a looping MIDI on its own synth + SpessaSynth's
+  // built-in Sequencer, fully separate from the decks (no Tone Transport,
+  // no deck synth state touched). Browsers only allow sound before a user
+  // gesture on sites they already trust, so this plays only when the audio
+  // context is already allowed to run — otherwise the start screen stays
+  // silent, and nothing extra is set up.
+  let titleMusic = null;
+  async function startTitleMusic(sfBuffer) {
+    try {
+      nativeCtx.resume().catch(() => {});
+      await new Promise((r) => setTimeout(r, 150));
+      if (started || nativeCtx.state !== "running") return;
+      const gain = nativeCtx.createGain();
+      gain.gain.value = 0.8;
+      gain.connect(masterCompressor);
+      const synth = new WorkletSynthesizer(nativeCtx);
+      synth.connect(gain);
+      await synth.soundBankManager.addSoundBank(sfBuffer, "main");
+      await synth.isReady;
+      const midi = await (await fetch("music/title-careless.mid")).arrayBuffer();
+      if (started) { synth.destroy(); gain.disconnect(); return; }
+      const seq = new Sequencer(synth);
+      seq.loopCount = Infinity;
+      seq.loadNewSongList([{ binary: midi }]);
+      seq.play();
+      titleMusic = { synth, seq, gain };
+    } catch (err) {
+      log(`Title music unavailable: ${errText(err)}`);
+    }
+  }
+  function stopTitleMusic() {
+    if (!titleMusic) return;
+    const { synth, seq, gain } = titleMusic;
+    titleMusic = null;
+    nativeRampTo(gain.gain, 0, 0.6);
+    setTimeout(() => { seq.pause(); synth.destroy(); gain.disconnect(); }, 700);
   }
 
   function buildParts(slot) {
@@ -2577,15 +2644,17 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     if (started || !readyToStart) return;
     started = true;
     startScreen.hidden = true;
+    stopTitleMusic();
     Promise.all([Tone.start(), nativeCtx.resume()])
-      .then(() => playSfx("menuIn"))
+      .then(() => playSfx("loadStab"))
       .catch((err) => log(`Couldn't start audio: ${errText(err)}`));
   }
   startScreen.addEventListener("click", beginSession);
 
   log("Ready. Select a deck and press Enter to open its record bin, load a track and press Space to go live, then load another into the other deck and press Space again to Beatmatch Mix.");
   try {
-    await initAudioEngine();
+    const sfBuffer = await initAudioEngine();
+    startTitleMusic(sfBuffer); // not awaited: the tracks keep loading meanwhile
     selectDeck(slotA);
     await preloadBin();
     readyToStart = true;
