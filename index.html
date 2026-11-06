@@ -2,18 +2,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vinyl Crisis</title>
 <script>
-// Applied before first paint, synchronously, so there's no flash of the
-// wrong theme: a saved manual choice wins, otherwise fall back to the
-// system preference. The actual toggle button (further down) just calls
-// the same setTheme() it defines, once the rest of the page is parsed.
-(function () {
-  var saved = null;
-  try { saved = localStorage.getItem("bml-theme"); } catch (e) {}
-  var theme = saved === "light" || saved === "dark"
-    ? saved
-    : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-  document.documentElement.setAttribute("data-theme", theme);
-})();
+// Applied before first paint: every visit starts in dark mode, regardless
+// of the system preference. The toggle button (further down) can switch
+// themes during a visit, but the choice isn't remembered.
+document.documentElement.setAttribute("data-theme", "dark");
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -2017,10 +2009,9 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   }
   pauseOverlay.addEventListener("click", () => { if (PAUSE_ENABLED) togglePause(); });
 
-  // Theme toggle — the actual data-theme attribute is already set
-  // before first paint by the inline script up in <head> (reads
-  // localStorage, falls back to the system preference), so this just
-  // has to sync the icon to whatever that landed on and handle clicks.
+  // Theme toggle — data-theme is already set to dark before first paint by
+  // the inline script up in <head>, so this just syncs the icon and
+  // switches themes for the current visit.
   const SUN_PATH = "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1Zm0 18a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1ZM3 11a1 1 0 0 1 1 1 1 1 0 0 1-1 1H1a1 1 0 1 1 0-2h2Zm20 0a1 1 0 0 1 1 1 1 1 0 0 1-1 1h-2a1 1 0 1 1 0-2h2ZM5.64 4.22a1 1 0 0 1 1.41 0l1.41 1.41a1 1 0 1 1-1.41 1.41L5.64 5.64a1 1 0 0 1 0-1.42Zm12.73 12.73a1 1 0 0 1 1.41 0l1.41 1.41a1 1 0 1 1-1.41 1.41l-1.41-1.41a1 1 0 0 1 0-1.41ZM18.36 4.22a1 1 0 0 1 1.41 1.41l-1.41 1.42a1 1 0 1 1-1.42-1.42l1.42-1.41ZM5.64 17.07a1 1 0 0 1 1.41 1.41l-1.41 1.41a1 1 0 1 1-1.41-1.41l1.41-1.41Z";
   const MOON_PATH = "M12.3 3a9 9 0 1 0 8.7 8.7 7.5 7.5 0 0 1-8.7-8.7Z";
   function applyThemeIcon(theme) {
@@ -2028,7 +2019,6 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   }
   function setTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
-    try { localStorage.setItem("bml-theme", theme); } catch (e) {}
     applyThemeIcon(theme);
   }
   applyThemeIcon(document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
