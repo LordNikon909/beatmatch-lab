@@ -356,6 +356,32 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
 .pause-hint { margin-top: 12px; font-family: var(--mono); font-size: 13px; color: rgba(255, 255, 255, 0.75); text-align: center; }
 @keyframes pauseBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.35; } }
 
+/* Title/loading screen: covers the app until everything's loaded and the
+   player presses Start — which is also the click/key the browser needs
+   before it'll let any audio play. */
+.start-screen {
+  position: fixed; inset: 0; z-index: 70; background: var(--bg);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.start-screen[hidden] { display: none; }
+.start-card { width: min(600px, 100%); text-align: center; }
+.start-title {
+  font-family: var(--display); font-size: clamp(30px, 7vw, 46px); font-weight: 700;
+  letter-spacing: 0.12em; color: var(--fg); line-height: 1.1;
+}
+.start-bar { margin: 32px 0 10px; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.start-bar-fill { height: 100%; width: 0%; background: var(--accent-green); transition: width 0.15s linear; }
+.start-status { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); min-height: 1.5em; }
+.start-status.error { color: var(--accent-a); }
+.start-button {
+  margin-top: 28px; padding: 14px 34px; border-radius: 999px; border: 0;
+  background: var(--accent-green); color: #0d2b1f; cursor: pointer;
+  font-family: var(--display); font-size: 18px; font-weight: 700; letter-spacing: 0.12em;
+}
+.start-button:disabled { background: var(--panel-raised); color: var(--fg-dim); cursor: default; }
+.start-button:not(:disabled) { animation: pauseBlink 1.2s steps(1) infinite; }
+.start-hint { margin-top: 14px; font-family: var(--mono); font-size: 12px; color: var(--fg-dim); }
+
 .log {
   background: #000; color: #8fe88f; font-family: var(--mono); margin-bottom: 20px;
   font-size: 11.5px; line-height: 1.5; border-radius: 10px;
@@ -519,6 +545,16 @@ button.primary[data-slot="b"] { background: var(--accent-b); color: #07232b; bor
   </div>
 </div>
 
+<div class="start-screen" id="startScreen">
+  <div class="start-card">
+    <div class="start-title">BEAT MATCH LAB</div>
+    <div class="start-bar"><div class="start-bar-fill" id="startBarFill"></div></div>
+    <div class="start-status" id="startStatus">Loading…</div>
+    <button class="start-button" id="startButton" disabled>LOADING</button>
+    <div class="start-hint">Click or press any key to start. A controller works once you're in.</div>
+  </div>
+</div>
+
 <div class="pause-overlay" id="pauseOverlay" hidden>
   <div>
     <div class="pause-title">PAUSED</div>
@@ -540,6 +576,42 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     const t = new Date().toLocaleTimeString([], { hour12: false });
     logEl.textContent += `[${t}] ${msg}\n`;
     logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // Start screen (see .start-screen). Load progress runs 0..1 across the
+  // boot steps; `started` gates every control until the player presses Start.
+  const startScreen = document.getElementById("startScreen");
+  const startBarFill = document.getElementById("startBarFill");
+  const startStatus = document.getElementById("startStatus");
+  const startButton = document.getElementById("startButton");
+  let started = false;
+  let readyToStart = false;
+  function setStartProgress(fraction, status) {
+    startBarFill.style.width = `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`;
+    if (status) startStatus.textContent = status;
+  }
+
+  // fetch() as an ArrayBuffer, reporting bytes received so far. Falls back
+  // to a plain read when the server doesn't send a Content-Length.
+  async function fetchWithProgress(url, onProgress) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+    const total = Number(res.headers.get("content-length")) || 0;
+    if (!res.body || !total) return res.arrayBuffer();
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      onProgress(Math.min(received, total), total);
+    }
+    const bytes = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+    return bytes.buffer;
   }
 
   // The synth engine runs on its OWN plain native AudioContext, kept
@@ -1230,11 +1302,15 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   let slotA, slotB;
   async function initAudioEngine() {
     log("Loading the sampler engine…");
+    setStartProgress(0.02, "Loading the sound engine…");
     await nativeCtx.audioWorklet.addModule("spessasynth/spessasynth_processor.min.js");
     slotA = makeSlot("A");
     slotB = makeSlot("B");
 
-    const sfBuffer = await (await fetch("soundfonts/GeneralUserGS.sf3")).arrayBuffer();
+    const mb = (n) => (n / 1048576).toFixed(1);
+    const sfBuffer = await fetchWithProgress("soundfonts/GeneralUserGS.sf3", (got, total) =>
+      setStartProgress(0.05 + 0.75 * (got / total), `Loading instruments… ${mb(got)} / ${mb(total)} MB`));
+    setStartProgress(0.8, "Preparing instruments…");
     await Promise.all([
       slotA.synth.soundBankManager.addSoundBank(sfBuffer.slice(0), "main"),
       slotB.synth.soundBankManager.addSoundBank(sfBuffer.slice(0), "main"),
@@ -1881,6 +1957,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   // true when the action applies in the current mode (menu open or not),
   // which tells the keyboard handler to swallow the key.
   function handleControl(action) {
+    if (!started) return false; // nothing works behind the start screen
     // TEMPORARILY DISABLED while ruling out pause/resume as a source of
     // the timing issues under investigation — togglePause() itself is
     // untouched, just unreachable from here. Flip PAUSE_ENABLED back to
@@ -1942,6 +2019,12 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
     p: "pause", P: "pause", Enter: "pause",
   };
   window.addEventListener("keydown", (e) => {
+    if (!started) {
+      // Any key starts (once loading is done) — it's the audio-unlock gesture.
+      if (e.key !== "Tab") e.preventDefault();
+      beginSession();
+      return;
+    }
     const tag = document.activeElement && document.activeElement.tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
     const action = KEY_ACTIONS[e.key] || (e.code === "Space" ? "go" : null);
@@ -2426,6 +2509,7 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
   }
 
   async function preloadBin() {
+    setStartProgress(0.85, "Loading tracks…");
     let names, fromListing;
     try {
       names = await discoverLocalMidis();
@@ -2462,17 +2546,39 @@ import { WorkletSynthesizer } from "https://cdn.jsdelivr.net/npm/spessasynth_lib
         failed++;
         log(`Could not preload "${name}": ${errText(err)}`);
       }
+      setStartProgress(0.85 + 0.15 * ((loaded + failed) / names.length), `Loading tracks… ${loaded + failed} / ${names.length}`);
     }
     log(`Preloaded ${loaded} record(s) from tracks/ into the bin${failed ? ` (${failed} failed — see above)` : ""}.`);
   }
+
+  // The Start press doubles as the user gesture browsers require before any
+  // audio can play. It only unlocks the two audio contexts — the Transport
+  // still starts on the first arm (ensureAudio), so a loaded deck doesn't
+  // start advancing silently before the player actually plays it.
+  function beginSession() {
+    if (started || !readyToStart) return;
+    started = true;
+    startScreen.hidden = true;
+    Promise.all([Tone.start(), nativeCtx.resume()])
+      .then(() => playSfx("menuIn"))
+      .catch((err) => log(`Couldn't start audio: ${errText(err)}`));
+  }
+  startScreen.addEventListener("click", beginSession);
 
   log("Ready. Select a deck and press Enter to open its record bin, load a track and press Space to go live, then load another into the other deck and press Space again to Beatmatch Mix.");
   try {
     await initAudioEngine();
     selectDeck(slotA);
     await preloadBin();
+    readyToStart = true;
+    setStartProgress(1, `Ready: ${binEntries.length} tracks loaded`);
+    startButton.disabled = false;
+    startButton.textContent = "PRESS START";
   } catch (err) {
     log(`Fatal: couldn't start the audio engine: ${errText(err)}`);
+    startStatus.classList.add("error");
+    startStatus.textContent = `Couldn't load: ${errText(err)}. Reload the page to try again.`;
+    startButton.textContent = "ERROR";
   }
 })();
 </script>
