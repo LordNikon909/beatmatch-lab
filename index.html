@@ -69,6 +69,23 @@
   color-scheme: light;
 }
 * { box-sizing: border-box; }
+/* Whole-page CRT overlay (after codepen.io/thisanimus/pen/OJpaqWz): RGB
+   scanlines plus vertical phosphor stripes, overlay-blended over
+   everything. Pinned to the viewport above every layer (start screen,
+   menus, pause) and click-through, so it covers the page however it
+   scrolls. Overlay-blending leaves pure black and pure white untouched. */
+body {
+  --crt-red: rgb(218, 49, 49);
+  --crt-green: rgb(112, 159, 115);
+  --crt-blue: rgb(40, 129, 206);
+}
+body::before, body::after {
+  content: ""; position: fixed; inset: 0; z-index: 100;
+  pointer-events: none; mix-blend-mode: overlay; transform: translateZ(0);
+}
+body::before { background: repeating-linear-gradient(var(--crt-red) 0px, var(--crt-green) 2px, var(--crt-blue) 4px); }
+body::after { background: repeating-linear-gradient(90deg, var(--crt-red) 1px, var(--crt-green) 2px, var(--crt-blue) 3px); }
+
 body {
   background: var(--bg);
   color: var(--fg);
@@ -182,6 +199,7 @@ body {
   cursor: pointer;
 }
 .deck-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
 .deck-time {
   position: absolute; top: 10px; right: 12px; z-index: 2;
   display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
