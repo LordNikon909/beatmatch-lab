@@ -88,7 +88,7 @@ body {
   font-family: var(--body);
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
-  padding-block: 20px 48px;
+  padding-block: 20px calc(48px + var(--night-h, 0px)); /* room for the fixed night timeline */
 }
 .wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 .decks { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -449,11 +449,90 @@ html.crt-off .crt-toggle .crt-slash { display: inline; }
 .keybind-row kbd.pad { border-radius: 999px; padding: 2px 7px; }
 .keybind-row .or { opacity: 0.55; }
 .debug-stats {
-  position: fixed; bottom: 10px; right: 10px; z-index: 50;
+  position: fixed; bottom: calc(10px + var(--night-h, 0px)); right: 10px; z-index: 50;
   background: rgba(0, 0, 0, 0.75); color: #8fe88f; font-family: var(--mono);
   font-size: 10.5px; line-height: 1.6; padding: 8px 10px; border-radius: 8px;
   white-space: pre; pointer-events: none; opacity: 0.85;
 }
+/* The night: an 18-track timeline fixed to the bottom of the viewport
+   (intro, 4 / 8 / 4 tracks, outro), after the Framer reference
+   (thoughtful-messages-548606.framer.app). Laid out in that design's own
+   1340px-wide coordinates and scaled to fit the window (see layoutNight).
+   Each shape flips over into a card the moment its track is played. */
+.night {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  background: var(--bg); padding: 12px 16px 10px;
+  display: flex; justify-content: center;
+}
+.night-inner {
+  position: relative; width: 1340px; height: 126px; flex: none;
+  transform-origin: top center; font-family: var(--font-ui);
+}
+.night-line { position: absolute; left: 31px; width: 1282px; top: 25.5px; height: 6px; background: var(--fg); }
+.night-label { position: absolute; top: 75px; font-size: 16px; line-height: 19px; color: var(--fg); white-space: nowrap; }
+.night-bracket { position: absolute; top: 100px; height: 24px; border: 3px solid var(--fg); border-top: 0; }
+.tl-slot {
+  position: absolute; top: 28.5px; width: 66px; height: 60px;
+  transform: translate(-50%, -50%); display: grid; place-items: center; perspective: 300px;
+}
+.tl-shape, .tl-card { grid-area: 1 / 1; backface-visibility: hidden; }
+.tl-shape svg { display: block; overflow: visible; }
+.tl-shape svg > * { fill: var(--slot-color); stroke: #f5f5f5; stroke-width: 2; }
+.tl-card {
+  width: 42px; height: 59px; border-radius: 6px; border: 2px solid #f5f5f5;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  font-size: 13px; line-height: 16px; font-weight: 700;
+  visibility: hidden;
+}
+.tl-card.night { background: #2b2b2b; color: #f5f5f5; }
+.tl-card.day { background: #d9d9d9; color: #2b2b2b; }
+/* The flip: the shape turns edge-on (90°, invisible), then the card turns
+   in from the other side, so the two read as one card flipping over. */
+.tl-slot.revealed .tl-shape { animation: tlFlipOut 0.2s ease-in forwards; }
+.tl-slot.revealed .tl-card { visibility: visible; animation: tlFlipIn 0.26s ease-out 0.2s both; }
+@keyframes tlFlipOut { from { transform: rotateY(0deg); } to { transform: rotateY(90deg); visibility: hidden; } }
+@keyframes tlFlipIn { from { transform: rotateY(-90deg); } to { transform: rotateY(0deg); } }
+/* The next slot to fill pulses in its own color. */
+.tl-slot.next .tl-shape svg { animation: tlPulse 1.1s ease-in-out infinite; }
+@keyframes tlPulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
+  50% { transform: scale(1.14); filter: drop-shadow(0 0 7px var(--slot-color)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-slot.revealed .tl-shape { animation: none; visibility: hidden; }
+  .tl-slot.revealed .tl-card { animation: none; }
+  .tl-slot.next .tl-shape svg { animation: none; filter: drop-shadow(0 0 6px var(--slot-color)); }
+}
+
+/* End of the night: an RPG-style results window over everything but the
+   timeline (which stays in view, filled in). */
+.night-end {
+  position: fixed; left: 0; right: 0; top: 0; bottom: var(--night-h, 0px); z-index: 65;
+  background: rgba(10, 10, 14, 0.86);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 16px;
+  cursor: pointer;
+}
+.night-end[hidden] { display: none; }
+.night-end-title {
+  font-family: var(--display); font-size: clamp(26px, 4.5vw, 44px); font-weight: 700;
+  letter-spacing: 0.15em; color: #fff; text-align: center; text-shadow: 0 2px 16px rgba(0, 0, 0, 0.8);
+}
+.night-end-window {
+  width: min(560px, 100%); padding: 18px 22px; border-radius: 8px;
+  background: linear-gradient(180deg, #2a3590 0%, #0d1240 100%);
+  border: 2px solid #e6e8f2; box-shadow: 0 0 0 2px #0d1240, 0 10px 40px rgba(0, 0, 0, 0.6);
+  font-family: var(--display); color: #fff; font-size: 15px;
+}
+.night-stat { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; visibility: hidden; }
+.night-stat.shown { visibility: visible; }
+.night-stat-label { flex: none; color: #c9d0ff; }
+.night-stat-dots { flex: 1; border-bottom: 2px dotted rgba(255, 255, 255, 0.3); transform: translateY(-4px); min-width: 12px; }
+.night-stat-value { flex: none; max-width: 60%; text-align: right; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.night-end-prompt {
+  font-family: var(--display); font-size: 16px; font-weight: 700; letter-spacing: 0.15em; color: #fff;
+  animation: pauseBlink 1.2s steps(1) infinite;
+}
+.night-end-prompt[hidden] { display: none; }
 </style>
 
 <button class="crt-toggle" id="crtToggle" aria-label="CRT effect" aria-pressed="true" title="CRT effect">
@@ -464,6 +543,15 @@ html.crt-off .crt-toggle .crt-slash { display: inline; }
 </button>
 
 <div class="debug-stats" id="debugStats"></div>
+
+<div class="night" id="night" aria-label="Tonight's set">
+  <div class="night-inner" id="nightInner"></div>
+</div>
+<div class="night-end" id="nightEnd" hidden>
+  <div class="night-end-title">THE NIGHT IS OVER</div>
+  <div class="night-end-window" id="nightEndStats"></div>
+  <div class="night-end-prompt" id="nightEndPrompt" hidden>PRESS ANY BUTTON</div>
+</div>
 
 <div class="wrap">
   <div class="log" id="log"></div>
@@ -1384,11 +1472,11 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   // order — maybeStartTitleMusic is called from both places.
   let titleMusic = null;
   let titleSoundfont = null;
+  let titleMusicLoading = false;
   function maybeStartTitleMusic() {
-    if (!introStarted || !titleSoundfont || started) return;
-    const sfBuffer = titleSoundfont;
-    titleSoundfont = null;
-    startTitleMusic(sfBuffer);
+    if (!introStarted || !titleSoundfont || started || titleMusic || titleMusicLoading) return;
+    titleMusicLoading = true;
+    startTitleMusic(titleSoundfont.slice(0)).finally(() => { titleMusicLoading = false; });
   }
   async function startTitleMusic(sfBuffer) {
     try {
@@ -1830,13 +1918,14 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   }
 
   async function armDeck(slot, which) {
-    if (!slot.midi || slot.playing) return;
+    if (!slot.midi || slot.playing || nightFull()) return;
     // The one start that isn't a mix: the set's opening track (or the first
     // one after Stop All). Every later go-press triggers a mix instead.
     playSfx("firstPlay");
     const volSlider = which === "A" ? volA : volB;
     await ensureAudio();
     playSlot(slot, volSlider.value);
+    recordPlay(slot);
     log(`Deck ${which} playing.`);
     updateLiveBadges();
     refreshMixInAvailability();
@@ -2070,7 +2159,7 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
   // true when the action applies in the current mode (menu open or not),
   // which tells the keyboard handler to swallow the key.
   function handleControl(action) {
-    if (!started) return false; // nothing works behind the start screen
+    if (!started || night.over) return false; // nothing works behind the start or results screen
     // TEMPORARILY DISABLED while ruling out pause/resume as a source of
     // the timing issues under investigation — togglePause() itself is
     // untouched, just unreachable from here. Flip PAUSE_ENABLED back to
@@ -2141,6 +2230,11 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
       if (!introStarted) beginIntro(); else beginSession();
       return;
     }
+    if (night.over) {
+      if (e.key !== "Tab") e.preventDefault();
+      if (!e.repeat) endScreenPress();
+      return;
+    }
     const tag = document.activeElement && document.activeElement.tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
     const action = KEY_ACTIONS[e.key] || (e.code === "Space" ? "go" : null);
@@ -2161,10 +2255,16 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
       if (!pad || pad.mapping !== "standard") continue;
       const prev = padPrevPressed.get(pad.index) || [];
       const pressed = pad.buttons.map((b) => b.pressed);
+      const anyNewPress = pressed.some((p, i) => p && !prev[i]);
+      padPrevPressed.set(pad.index, pressed);
+      // "Press any button" screens. The start gate itself still needs a key
+      // or click (a controller press can't unlock audio), but once past it
+      // the controller can press Start too.
+      if (anyNewPress && night.over) { endScreenPress(); continue; }
+      if (anyNewPress && !started && introStarted) { beginSession(); continue; }
       for (const [i, action] of Object.entries(PAD_ACTIONS)) {
         if (pressed[i] && !prev[i]) handleControl(action);
       }
-      padPrevPressed.set(pad.index, pressed);
     }
   }
   window.addEventListener("gamepadconnected", (e) => {
@@ -2268,7 +2368,7 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
     // Guard re-entrancy synchronously, before any await: without this, a
     // rapid double-trigger can fire this twice before the first call
     // reaches "mixInBusy = true", double-scheduling the whole mix.
-    if (mixInBusy || !mixInAvailable || mixState.phase === "armed" || mixState.phase === "crossfading") return;
+    if (mixInBusy || !mixInAvailable || mixState.phase === "armed" || mixState.phase === "crossfading" || nightFull()) return;
     const roles = getAnchorIncoming();
     if (!roles || !roles.incoming.midi) return;
     mixInBusy = true;
@@ -2351,6 +2451,11 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
       anchor.gain.gain.cancelScheduledValues(nt);
       anchor.gain.gain.setValueAtTime(currentAnchorVal, nt);
       anchor.gain.gain.linearRampToValueAtTime(0, nt + overlapSec);
+
+      // This callback runs a little ahead of the audio; flip the card the
+      // moment the incoming track is actually heard.
+      const audibleInMs = (time - Tone.context.currentTime + outputLatencySeconds()) * 1000;
+      setTimeout(() => recordPlay(incoming, { overlapBars }), Math.max(0, audibleInMs));
     }, nextPhrase));
 
     incoming.playing = true;
@@ -2465,9 +2570,283 @@ import { WorkletSynthesizer, Sequencer } from "https://cdn.jsdelivr.net/npm/spes
     }
   }
 
+
+  // --- The night: 18 tracks, intro to outro (see .night in the CSS) ---
+  // Positions are in the Framer reference's own 1340px-wide coordinates
+  // (layoutNight scales the whole strip to fit). Shapes are decoration,
+  // just so every slot looks distinct; the green and red diamonds mark the
+  // start and end of the night.
+  const NIGHT_COLORS = { start: "#21db94", early: "#50b6ff", peak: "#ff9e0c", late: "#895eff", end: "#ff787a" };
+  const NIGHT_SLOTS = [
+    ["diamond", "start"],
+    ["square", "early"], ["ellipse", "early"], ["pill", "early"], ["ellipse", "early"],
+    ["ellipse", "peak"], ["pill", "peak"], ["ellipse", "peak"], ["square", "peak"],
+    ["square", "peak"], ["ellipse", "peak"], ["pill", "peak"], ["ellipse", "peak"],
+    ["ellipse", "late"], ["pill", "late"], ["ellipse", "late"], ["square", "late"],
+    ["diamond", "end"],
+  ].map(([shape, section], i, all) => ({
+    shape, color: NIGHT_COLORS[section],
+    x: i === 0 ? 32.5 : i === all.length - 1 ? 1307.5 : 107 + 75 * (i - 1),
+  }));
+  const NIGHT_LENGTH = NIGHT_SLOTS.length;
+  const NIGHT_LABELS = [["START", 4], ["10PM", 184], ["12AM", 528], ["2AM", 775], ["4AM", 1112], ["END", 1301]];
+  const NIGHT_BRACKETS = [[1, 359], [382, 574], [978, 359]];
+  const NIGHT_SHAPE_SVG = {
+    diamond: '<svg width="65" height="39" viewBox="0 0 65 39"><path d="M32.5 0 L65 19.5 L32.5 39 L0 19.5 Z"/></svg>',
+    square: '<svg width="52" height="31" viewBox="0 0 52 31"><rect width="52" height="31"/></svg>',
+    ellipse: '<svg width="52" height="31" viewBox="0 0 52 31"><ellipse cx="26" cy="15.5" rx="26" ry="15.5"/></svg>',
+    pill: '<svg width="52" height="31" viewBox="0 0 52 31"><rect width="52" height="31" rx="13"/></svg>',
+  };
+  // Drop a file in sfx/ and point this at it to give the card flip a sound.
+  const CARD_FLIP_SFX = null;
+  if (CARD_FLIP_SFX) loadSfx("cardFlip", CARD_FLIP_SFX);
+
+  const nightEl = document.getElementById("night");
+  const nightInner = document.getElementById("nightInner");
+  const nightEnd = document.getElementById("nightEnd");
+  const nightEndStats = document.getElementById("nightEndStats");
+  const nightEndPrompt = document.getElementById("nightEndPrompt");
+
+  // plays: one entry per slot filled so far. outro: the deck playing the
+  // last track, watched by nightFrame for the end of its file. ending: that
+  // last track is fading out; over: the results screen is up.
+  const night = { plays: [], startT: 0, outro: null, ending: false, over: false, statsShown: 0, statsTimer: null };
+  const nightSlotEls = NIGHT_SLOTS.map((slotDef, i) => {
+    const el = document.createElement("div");
+    el.className = "tl-slot";
+    el.style.left = slotDef.x + "px";
+    el.style.setProperty("--slot-color", slotDef.color);
+    el.innerHTML = `<div class="tl-shape">${NIGHT_SHAPE_SVG[slotDef.shape]}</div><div class="tl-card ${i % 2 === 0 ? "night" : "day"}"></div>`;
+    return el;
+  });
+  nightInner.insertAdjacentHTML("beforeend", '<div class="night-line"></div>' +
+    NIGHT_LABELS.map(([text, x]) => `<div class="night-label" style="left:${x}px">${text}</div>`).join("") +
+    NIGHT_BRACKETS.map(([x, w]) => `<div class="night-bracket" style="left:${x}px;width:${w}px"></div>`).join(""));
+  nightSlotEls.forEach((el) => nightInner.appendChild(el));
+
+  function layoutNight() {
+    const scale = Math.min(1, (window.innerWidth - 32) / 1340);
+    nightInner.style.transform = `scale(${scale})`;
+    nightInner.style.marginBottom = `${126 * (scale - 1)}px`; // the transform doesn't shrink layout
+    nightInner.style.marginLeft = nightInner.style.marginRight = `${(1340 * (scale - 1)) / 2}px`;
+    document.documentElement.style.setProperty("--night-h", `${nightEl.offsetHeight}px`);
+  }
+  window.addEventListener("resize", layoutNight);
+  layoutNight();
+
+  function camelotCode(key) {
+    return key ? `${camelotNumber(key.root, key.mode)}${key.mode === "minor" ? "A" : "B"}` : null;
+  }
+  // Same number, or a neighbouring number with the same letter, on the
+  // Camelot wheel: the classic "this mix is in key" rule.
+  function isHarmonicMix(keyA, keyB) {
+    if (!keyA || !keyB) return false;
+    const a = camelotNumber(keyA.root, keyA.mode), b = camelotNumber(keyB.root, keyB.mode);
+    if (a === b) return true;
+    return keyA.mode === keyB.mode && (Math.abs(a - b) === 1 || Math.abs(a - b) === 11);
+  }
+
+  function nightFull() {
+    return night.plays.length >= NIGHT_LENGTH;
+  }
+
+  function renderNightSlots() {
+    nightSlotEls.forEach((el, i) => {
+      el.classList.toggle("next", !night.over && i === night.plays.length);
+    });
+  }
+
+  // A track has just started playing (the first one) or just become audible
+  // in a mix (every later one): fill the next slot with its card.
+  function recordPlay(slot, info = {}) {
+    if (nightFull() || !slot.midi) return;
+    const i = night.plays.length;
+    if (i === 0) night.startT = Tone.Transport.seconds;
+    const entry = binEntries.find((e) => e.id === slot.binId);
+    const play = {
+      name: entry ? entry.name : "Unknown track",
+      binId: slot.binId,
+      bpm: slot.bpm,
+      key: slot.key,
+      overlapBars: info.overlapBars || 0,
+    };
+    night.plays.push(play);
+    if (i === NIGHT_LENGTH - 1) night.outro = slot;
+
+    const el = nightSlotEls[i];
+    const card = el.querySelector(".tl-card");
+    if (i === 0) card.innerHTML = "<span>INT</span>";
+    else if (i === NIGHT_LENGTH - 1) card.innerHTML = "<span>OUT</span>";
+    else card.innerHTML = `<span>${camelotCode(play.key) || "—"}</span><span>${Math.round(play.bpm)}</span>`;
+    el.title = `${play.name} · ${Math.round(play.bpm)} BPM${play.key ? ` · ${play.key.name}` : ""}`;
+    el.classList.add("revealed");
+    if (CARD_FLIP_SFX) playSfx("cardFlip");
+    renderNightSlots();
+    log(i === NIGHT_LENGTH - 1
+      ? `Track ${i + 1} of ${NIGHT_LENGTH}: "${play.name}" is the outro; the night ends when it finishes.`
+      : `Track ${i + 1} of ${NIGHT_LENGTH}: "${play.name}".`);
+  }
+
+  // Called every frame: once the outro is playing on its own, end the night
+  // when its file reaches the end (instead of looping like other tracks).
+  // If it was stopped some other way (Stop All), end the night right away.
+  function nightFrame() {
+    if (!night.outro || night.ending || night.over) return;
+    const slot = night.outro;
+    if (!slot.playing) {
+      if (!slotA.playing && !slotB.playing) finishNight();
+      return;
+    }
+    if (mixState.phase === "armed" || mixState.phase === "crossfading" || paused || !(slot.duration > 0)) return;
+    const effDur = effectiveDuration(slot);
+    const elapsed = mod(Tone.Transport.seconds - slot.transportStartOffset, effDur);
+    const wrapped = night.outroElapsed != null && elapsed < night.outroElapsed - 1;
+    night.outroElapsed = elapsed;
+    if (effDur - elapsed < 0.12 || wrapped) endOutro(slot);
+  }
+
+  // Stop feeding the outro new notes and let what's sounding ring out as it
+  // fades, then bring up the results.
+  function endOutro(slot) {
+    night.ending = true;
+    if (slot.rampCancel) slot.rampCancel();
+    if (slot.eventsPart) slot.eventsPart.stop();
+    nativeRampTo(slot.gain.gain, 0, 2.5);
+    log("The outro has finished. That's the night.");
+    setTimeout(() => {
+      silenceSynth(slot);
+      slot.playing = false;
+      updateLiveBadges();
+      refreshMixInAvailability();
+      finishNight();
+    }, 2700);
+  }
+
+  function nightStats() {
+    const plays = night.plays;
+    const fmtLen = (sec) => {
+      const total = Math.max(0, Math.round(sec));
+      const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s2 = total % 60;
+      return h ? `${h}:${String(m).padStart(2, "0")}:${String(s2).padStart(2, "0")}` : `${m}:${String(s2).padStart(2, "0")}`;
+    };
+    const bpms = plays.map((p) => Math.round(p.bpm));
+    let harmonic = 0, biggestJump = 0, barsBlended = 0;
+    for (let i = 1; i < plays.length; i++) {
+      if (isHarmonicMix(plays[i - 1].key, plays[i].key)) harmonic++;
+      biggestJump = Math.max(biggestJump, Math.abs(bpms[i] - bpms[i - 1]));
+      barsBlended += plays[i].overlapBars;
+    }
+    const counts = new Map();
+    plays.forEach((p) => counts.set(p.binId, (counts.get(p.binId) || 0) + 1));
+    let most = null;
+    for (const p of plays) {
+      const n = counts.get(p.binId);
+      if (n > 1 && (!most || n > most.n)) most = { name: p.name, n };
+    }
+    return [
+      ["Night length", fmtLen(Tone.Transport.seconds - night.startT)],
+      ["Tracks played", `${plays.length} / ${NIGHT_LENGTH}`],
+      ["Different tracks", String(counts.size)],
+      ["Harmonic mixes", `${harmonic} / ${Math.max(0, plays.length - 1)}`],
+      ["Tempo range", bpms.length ? `${Math.min(...bpms)}–${Math.max(...bpms)} BPM` : "—"],
+      ["Biggest tempo jump", `${biggestJump} BPM`],
+      ["Bars blended", String(barsBlended)],
+      ["Most played", most ? `${most.name} ×${most.n}` : "No repeats"],
+    ];
+  }
+
+  // The results screen: stats tick in one row at a time, then any button
+  // goes back to the start screen. A press while they're still ticking in
+  // just shows the rest.
+  function finishNight() {
+    if (night.over) return;
+    night.over = true;
+    night.ending = false;
+    if (menuOpen) closeTrackMenu();
+    renderNightSlots();
+    nightEndStats.innerHTML = "";
+    for (const [label, value] of nightStats()) {
+      const row = document.createElement("div");
+      row.className = "night-stat";
+      row.innerHTML = '<span class="night-stat-label"></span><span class="night-stat-dots"></span><span class="night-stat-value"></span>';
+      row.children[0].textContent = label;
+      row.children[2].textContent = value;
+      row.children[2].title = value;
+      nightEndStats.appendChild(row);
+    }
+    nightEndPrompt.hidden = true;
+    nightEnd.hidden = false;
+    night.statsShown = 0;
+    playSfx("loadStab");
+    clearInterval(night.statsTimer);
+    night.statsTimer = setInterval(showNextStat, 260);
+  }
+  function showNextStat() {
+    const rows = nightEndStats.children;
+    if (night.statsShown < rows.length) {
+      rows[night.statsShown++].classList.add("shown");
+      playSfx("menuIn");
+    }
+    if (night.statsShown >= rows.length) {
+      clearInterval(night.statsTimer);
+      night.statsTimer = null;
+      nightEndPrompt.hidden = false;
+    }
+  }
+  function endScreenPress() {
+    if (!night.over) return;
+    if (night.statsTimer) {
+      clearInterval(night.statsTimer);
+      night.statsTimer = null;
+      for (const row of nightEndStats.children) row.classList.add("shown");
+      night.statsShown = nightEndStats.children.length;
+      nightEndPrompt.hidden = false;
+      return;
+    }
+    returnToStart();
+  }
+  nightEnd.addEventListener("click", endScreenPress);
+
+  function resetNight() {
+    night.plays = [];
+    night.startT = 0;
+    night.outro = null;
+    night.outroElapsed = null;
+    night.ending = false;
+    night.over = false;
+    nightSlotEls.forEach((el) => {
+      el.classList.remove("revealed");
+      el.removeAttribute("title");
+      el.querySelector(".tl-card").innerHTML = "";
+    });
+    renderNightSlots();
+  }
+
+  // Back to the start screen (logo drop, title music, PRESS START) with
+  // both decks emptied and a fresh, empty night.
+  function returnToStart() {
+    stopAllDecks();
+    clearDeck(slotA, "A");
+    clearDeck(slotB, "B");
+    updateLiveBadges();
+    refreshMixInAvailability();
+    selectDeck(slotA);
+    nightEnd.hidden = true;
+    resetNight();
+    started = false;
+    startScreen.hidden = false;
+    startLogo.classList.remove("drop-in");
+    void startLogo.offsetWidth; // restart the drop animation
+    startLogo.classList.add("drop-in");
+    playSfx("logoIntro");
+    maybeStartTitleMusic();
+  }
+  renderNightSlots();
+
   function frame() {
     if (!slotA || !slotB) { requestAnimationFrame(frame); return; }
     pollGamepads();
+    nightFrame();
     const nowPerf = performance.now();
     perfStats.lastFrameMs = nowPerf - lastFrameTime;
     lastFrameTime = nowPerf;
